@@ -14,6 +14,32 @@ interface PatientApiRecord {
   insurance_plan_type: string | null
 }
 
+export interface PatientDetailApiRecord {
+  member_id: string
+  full_name: string
+  gender: string
+  age: number
+  date_of_birth: string | null
+  street_address: string | null
+  city: string | null
+  state: string | null
+  zip_code: number | string | null
+  location: string
+  phone_primary: string | null
+  phone_secondary: string | null
+  email_address: string | null
+  preferred_contact_method: string | null
+  preferred_language: string | null
+  marital_status: string | null
+  employment_status: string | null
+  caregiver_support: string | null
+  primary_conditions: string | null
+  insurance_plan_type: string | null
+  insurance_start_date: string | null
+  risk_tier: string | null
+  assigned_coordinator: string | null
+}
+
 const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? 'http://localhost:8000/api/v1/patients'
 const REQUEST_TIMEOUT_MS = 10000
 
@@ -73,4 +99,19 @@ export async function loadDashboardData(): Promise<DashboardData> {
     priorAuths: [],
     careGaps: [],
   }
+}
+
+export async function loadPatientDetail(memberId: string): Promise<PatientDetailApiRecord> {
+  const url = `${PATIENTS_ENDPOINT}/${encodeURIComponent(memberId)}`
+  const response = await fetchWithTimeout(url)
+  if (!response.ok) {
+    throw new Error(`Patient detail API failed with status ${response.status}`)
+  }
+
+  const payload = (await response.json()) as unknown
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Patient detail API returned invalid payload')
+  }
+
+  return payload as PatientDetailApiRecord
 }

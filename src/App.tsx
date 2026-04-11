@@ -4,7 +4,7 @@ import { QueuePage } from './pages/QueuePage'
 import { OverviewPage } from './pages/OverviewPage'
 import { DeepDivePage } from './pages/DeepDivePage'
 import { SummaryPage } from './pages/SummaryPage'
-import { loadDashboardData } from './services/dashboardApi'
+import { loadDashboardData, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from './types/questions'
@@ -59,6 +59,9 @@ function App() {
   const [deepDiveResponsesByMember, setDeepDiveResponsesByMember] = useState<Record<string, Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>>>({})
   const [carePlanDraftByMember, setCarePlanDraftByMember] = useState<Record<string, CarePlanDraft>>({})
   const [draftToastVisible, setDraftToastVisible] = useState(false)
+  const [patientDetailsByMember, setPatientDetailsByMember] = useState<Record<string, PatientDetailApiRecord>>({})
+  const [patientDetailsLoadingByMember, setPatientDetailsLoadingByMember] = useState<Record<string, boolean>>({})
+  const [patientDetailsErrorByMember, setPatientDetailsErrorByMember] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void (async () => {
@@ -75,6 +78,31 @@ function App() {
 
   const currentView: AppView = routeMatch?.view ?? 'queue'
   const selectedMemberId = routeMatch?.memberId ?? null
+
+  useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || patientDetailsByMember[selectedMemberId]) return
+
+    setPatientDetailsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setPatientDetailsErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const detail = await loadPatientDetail(selectedMemberId)
+        setPatientDetailsByMember((prev) => ({ ...prev, [selectedMemberId]: detail }))
+      } catch (error) {
+        setPatientDetailsErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load patient detail',
+        }))
+      } finally {
+        setPatientDetailsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, patientDetailsByMember])
 
   useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
@@ -187,6 +215,9 @@ function App() {
   const deepDiveStateForMember = selectedMemberId ? (deepDiveResponsesByMember[selectedMemberId] ?? createEmptySectionResponses()) : createEmptySectionResponses()
   const supervisorNotes = selectedMemberId ? (supervisorNotesByMember[selectedMemberId] ?? []) : []
   const currentCarePlanDraft = selectedMemberId ? (carePlanDraftByMember[selectedMemberId] ?? null) : null
+  const selectedPatientDetail = selectedMemberId ? (patientDetailsByMember[selectedMemberId] ?? null) : null
+  const selectedPatientDetailLoading = selectedMemberId ? (patientDetailsLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedPatientDetailError = selectedMemberId ? (patientDetailsErrorByMember[selectedMemberId] ?? '') : ''
 
   function buildCarePlanDraft(memberId: string): CarePlanDraft {
     const patient = members.find((member) => member.member_id === memberId)
@@ -452,8 +483,8 @@ function App() {
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-clinical-bg px-6 py-8">
-        <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
+      <div className="min-h-screen bg-clinical-bg px-2 py-2 md:px-4 md:py-4">
+        <div className="w-full rounded-xl border border-red-200 bg-white p-8 shadow-sm md:rounded-2xl">
           <h2 className="text-xl font-semibold text-red-700">Unable to load patient data</h2>
           <p className="mt-2 text-sm text-slate-700">{loadError}</p>
           <p className="mt-1 text-sm text-slate-600">Expected endpoint: http://localhost:8000/api/v1/patients</p>
@@ -465,8 +496,8 @@ function App() {
   const summaryDraft = currentCarePlanDraft ?? (selectedMemberId ? buildCarePlanDraft(selectedMemberId) : null)
 
   return (
-    <div className="min-h-screen bg-clinical-bg px-6 py-6 text-slate-900">
-      <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="min-h-screen bg-clinical-bg px-2 py-2 text-slate-900 md:px-4 md:py-4">
+      <div className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:rounded-2xl">
         <header className="no-print bg-clinical-header px-8 py-5 text-white">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -517,6 +548,9 @@ function App() {
                 <OverviewPage
                 selectedMember={selectedMember}
                 selectedTicket={selectedTicket}
+                  selectedPatientDetail={selectedPatientDetail}
+                  patientDetailLoading={selectedPatientDetailLoading}
+                  patientDetailError={selectedPatientDetailError}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}

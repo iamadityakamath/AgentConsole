@@ -2,10 +2,14 @@ import type { CareGap, EhrNote, LabResult, Medication, MemberProfile, PriorAutho
 import type { TicketRow } from '../types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
 import { OverviewView } from '../components/DashboardViews'
+import type { PatientDetailApiRecord } from '../services/dashboardApi'
 
 interface OverviewPageProps {
   selectedMember: MemberProfile | null
   selectedTicket: TicketRow | null
+  selectedPatientDetail: PatientDetailApiRecord | null
+  patientDetailLoading: boolean
+  patientDetailError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]

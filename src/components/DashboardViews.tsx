@@ -11,6 +11,7 @@ import type {
 import { useState } from 'react'
 import type { TicketRow } from '../types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
+import type { PatientDetailApiRecord } from '../services/dashboardApi'
 import {
   deepDiveSections,
   deepDiveStatusStyles,
@@ -208,6 +209,9 @@ export function TicketQueueView({
 interface OverviewViewProps {
   selectedMember: MemberProfile | null
   selectedTicket: TicketRow | null
+  selectedPatientDetail: PatientDetailApiRecord | null
+  patientDetailLoading: boolean
+  patientDetailError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
@@ -236,6 +240,9 @@ interface OverviewViewProps {
 export function OverviewView({
   selectedMember,
   selectedTicket,
+  selectedPatientDetail,
+  patientDetailLoading,
+  patientDetailError,
   selectedNotes,
   selectedLabs,
   selectedMeds,
@@ -269,10 +276,62 @@ export function OverviewView({
     { id: 'notes', label: 'EHR Clinical Notes' },
   ]
 
+  const demographicsSections = selectedPatientDetail
+    ? [
+      {
+        title: 'Identity',
+        rows: [
+          { label: 'Member ID', value: selectedPatientDetail.member_id },
+          { label: 'Gender', value: selectedPatientDetail.gender },
+          { label: 'Age', value: String(selectedPatientDetail.age) },
+          { label: 'Date of Birth', value: selectedPatientDetail.date_of_birth ?? 'N/A' },
+          { label: 'Preferred Language', value: selectedPatientDetail.preferred_language ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Address',
+        rows: [
+          { label: 'Street Address', value: selectedPatientDetail.street_address ?? 'N/A' },
+          { label: 'City', value: selectedPatientDetail.city ?? 'N/A' },
+          { label: 'State', value: selectedPatientDetail.state ?? 'N/A' },
+          { label: 'Zip Code', value: selectedPatientDetail.zip_code == null ? 'N/A' : String(selectedPatientDetail.zip_code) },
+          { label: 'Location', value: selectedPatientDetail.location },
+        ],
+      },
+      {
+        title: 'Contact',
+        rows: [
+          { label: 'Phone Primary', value: selectedPatientDetail.phone_primary ?? 'N/A' },
+          { label: 'Phone Secondary', value: selectedPatientDetail.phone_secondary ?? 'N/A' },
+          { label: 'Email Address', value: selectedPatientDetail.email_address ?? 'N/A' },
+          { label: 'Preferred Contact Method', value: selectedPatientDetail.preferred_contact_method ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Social Profile',
+        rows: [
+          { label: 'Marital Status', value: selectedPatientDetail.marital_status ?? 'N/A' },
+          { label: 'Employment Status', value: selectedPatientDetail.employment_status ?? 'N/A' },
+          { label: 'Caregiver Support', value: selectedPatientDetail.caregiver_support ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Clinical and Coverage',
+        rows: [
+          { label: 'Primary Conditions', value: selectedPatientDetail.primary_conditions ?? 'N/A' },
+          { label: 'Insurance Plan Type', value: selectedPatientDetail.insurance_plan_type ?? 'N/A' },
+          { label: 'Insurance Start Date', value: selectedPatientDetail.insurance_start_date ?? 'N/A' },
+          { label: 'Risk Tier', value: selectedPatientDetail.risk_tier ?? 'N/A' },
+          { label: 'Assigned Coordinator', value: selectedPatientDetail.assigned_coordinator ?? 'N/A' },
+        ],
+      },
+    ]
+    : []
+
   return (
-    <div className="grid h-full grid-cols-5 gap-5">
+    <div className="grid h-full grid-cols-12 gap-5">
       {!selectedMember || !selectedTicket ? (
-        <div className="col-span-5 flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+        <div className="col-span-12 flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
           <div>
             <h2 className="text-xl font-semibold text-slate-800">No Patient Selected</h2>
             <p className="mt-2 text-slate-600">Choose Start Call Prep from the Ticket Queue to generate a personalized call plan.</p>
@@ -280,7 +339,7 @@ export function OverviewView({
         </div>
       ) : (
         <>
-          <div className="col-span-2 grid grid-cols-[220px_1fr] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="col-span-5 grid grid-cols-[240px_1fr] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <aside className="rounded-lg border border-slate-200 bg-white p-2">
               <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Sections</p>
               <div className="mt-1 space-y-1">
@@ -300,17 +359,49 @@ export function OverviewView({
               {activePanel === 'demographics' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Patient Demographics</h3>
-                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <h2 className="text-lg font-semibold text-slate-900">{selectedMember.patient_name}</h2>
-                    <p className="text-sm text-slate-500">Member ID: {selectedMember.member_id}</p>
-                    <p className="mt-1 text-sm text-slate-600">{selectedMember.age} years, {selectedMember.gender}, {selectedMember.location}</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[selectedTicket.severityLevel]}`}>
-                        {selectedTicket.severityLevel}
-                      </span>
-                      <span className="text-xs text-slate-500">Primary: {selectedTicket.primaryConditions.join(' | ')}</span>
+                  {patientDetailLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading patient details...</p>
+                  ) : null}
+                  {!patientDetailLoading && patientDetailError ? (
+                    <p className="mt-2 text-sm text-red-700">{patientDetailError}</p>
+                  ) : null}
+                  {!patientDetailLoading && !patientDetailError && selectedPatientDetail ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="rounded-lg border border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50 px-4 py-3">
+                        <p className="text-lg font-semibold text-slate-900">{selectedPatientDetail.full_name}</p>
+                        <p className="mt-1 inline-flex rounded-md bg-white px-2 py-0.5 font-mono text-xs text-slate-700">
+                          {selectedPatientDetail.member_id}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700">
+                            {selectedPatientDetail.age}{selectedPatientDetail.gender}
+                          </span>
+                          <span className="inline-flex rounded-full border border-blue-200 bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                            {selectedPatientDetail.risk_tier ?? 'N/A'}
+                          </span>
+                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            {selectedPatientDetail.preferred_contact_method ?? 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                        {demographicsSections.map((section) => (
+                          <div key={section.title} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{section.title}</p>
+                            <div className="space-y-1.5">
+                              {section.rows.map((row) => (
+                                <div key={row.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{row.label}</p>
+                                  <p className="mt-1 min-w-0 break-words text-sm leading-snug text-slate-800">{row.value}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </>
               ) : null}
 
@@ -418,7 +509,7 @@ export function OverviewView({
             </div>
           </div>
 
-          <div className="col-span-3 flex flex-col rounded-xl border border-slate-200 bg-white p-4">
+          <div className="col-span-7 flex flex-col rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
               <p className="text-sm text-slate-500">
@@ -463,7 +554,7 @@ export function OverviewView({
               </div>
             </div>
 
-            <div className="max-h-[640px] flex-1 space-y-2 overflow-auto pr-1">
+            <div className="max-h-[calc(100vh-300px)] flex-1 space-y-2 overflow-auto pr-1">
               {visibleQuestions.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
                   All questions are currently skipped. Return to Ticket Queue and choose another member or continue to Begin Call.
