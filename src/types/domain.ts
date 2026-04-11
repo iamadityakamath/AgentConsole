@@ -68,10 +68,13 @@ export interface EhrNote {
 export interface LabResult {
   lab_id: string
   member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
   draw_date: string
   lab_type: string
   test_name: string
-  result_value: string
+  result_value: number | string
   unit: string
   reference_range: string
   result_flag: 'Normal' | 'High' | 'Low' | 'Critical High' | 'Critical Low'
@@ -118,6 +121,9 @@ export interface PriorAuthorization {
 export interface CareGap {
   gap_id: string
   member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
   gap_category: string
   gap_description: string
   clinical_guideline: string

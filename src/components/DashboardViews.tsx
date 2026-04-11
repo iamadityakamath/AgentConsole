@@ -212,6 +212,10 @@ interface OverviewViewProps {
   selectedPatientDetail: PatientDetailApiRecord | null
   patientDetailLoading: boolean
   patientDetailError: string
+  careGapsLoading: boolean
+  careGapsError: string
+  labResultsLoading: boolean
+  labResultsError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
@@ -243,6 +247,10 @@ export function OverviewView({
   selectedPatientDetail,
   patientDetailLoading,
   patientDetailError,
+  careGapsLoading,
+  careGapsError,
+  labResultsLoading,
+  labResultsError,
   selectedNotes,
   selectedLabs,
   selectedMeds,
@@ -408,19 +416,55 @@ export function OverviewView({
               {activePanel === 'gaps' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Care Gap Reports</h3>
-                  {selectedGaps.filter((gap) => gap.gap_status === 'Open').length === 0 ? (
+                  {careGapsLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading care gaps...</p>
+                  ) : null}
+                  {!careGapsLoading && careGapsError ? (
+                    <p className="mt-2 text-sm text-red-700">{careGapsError}</p>
+                  ) : null}
+                  {!careGapsLoading && !careGapsError && selectedGaps.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
                   ) : (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {selectedGaps.filter((gap) => gap.gap_status === 'Open').map((gap) => (
-                        <li key={gap.gap_id} className="flex items-center justify-between gap-3 rounded border border-slate-200 px-2 py-1.5">
-                          <span className="text-slate-700">{truncateText(gap.gap_description, 60)}</span>
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
-                            {gap.priority}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-2 space-y-3 text-sm">
+                      {selectedGaps.map((gap) => {
+                        const fields: Array<{ label: string; value: string }> = [
+                          { label: 'gap_id', value: gap.gap_id },
+                          { label: 'member_id', value: gap.member_id },
+                          { label: 'patient_name', value: gap.patient_name ?? 'N/A' },
+                          { label: 'gender', value: gap.gender ?? 'N/A' },
+                          { label: 'age', value: gap.age == null ? 'N/A' : String(gap.age) },
+                          { label: 'gap_category', value: gap.gap_category },
+                          { label: 'gap_description', value: gap.gap_description },
+                          { label: 'clinical_guideline', value: gap.clinical_guideline },
+                          { label: 'last_completed_date', value: gap.last_completed_date || 'N/A' },
+                          { label: 'days_overdue', value: String(gap.days_overdue) },
+                          { label: 'priority', value: gap.priority },
+                          { label: 'recommended_action', value: gap.recommended_action },
+                          { label: 'gap_status', value: gap.gap_status },
+                          { label: 'assigned_to', value: gap.assigned_to },
+                          { label: 'gap_notes', value: gap.gap_notes || 'N/A' },
+                        ]
+
+                        return (
+                          <div key={gap.gap_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                              <p className="font-semibold text-slate-800">{truncateText(gap.gap_description, 70)}</p>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
+                                {gap.priority}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                              {fields.map((field) => (
+                                <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                  <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </>
               ) : null}
@@ -428,27 +472,67 @@ export function OverviewView({
               {activePanel === 'labs' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Lab Results</h3>
-                  {selectedLabs.length === 0 ? (
+                  {labResultsLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading lab results...</p>
+                  ) : null}
+                  {!labResultsLoading && labResultsError ? (
+                    <p className="mt-2 text-sm text-red-700">{labResultsError}</p>
+                  ) : null}
+                  {!labResultsLoading && !labResultsError && selectedLabs.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
                   ) : (
-                    <table className="mt-2 w-full text-left text-sm">
-                      <thead>
-                        <tr className="text-xs text-slate-500">
-                          <th className="py-1 font-medium">Test Name</th>
-                          <th className="py-1 font-medium">Result</th>
-                          <th className="py-1 font-medium">Flag</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedLabs.slice(0, 8).map((lab, idx) => (
-                          <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
-                            <td className="px-1 py-1.5">{lab.test_name}</td>
-                            <td className="px-1 py-1.5">{lab.result_value} {lab.unit}</td>
-                            <td className={`px-1 py-1.5 ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div className="mt-2 space-y-3 text-sm">
+                      {selectedLabs.map((lab) => {
+                        const fields: Array<{ label: string; value: string }> = [
+                          { label: 'lab_id', value: lab.lab_id },
+                          { label: 'member_id', value: lab.member_id },
+                          { label: 'patient_name', value: lab.patient_name ?? 'N/A' },
+                          { label: 'gender', value: lab.gender ?? 'N/A' },
+                          { label: 'age', value: lab.age == null ? 'N/A' : String(lab.age) },
+                          { label: 'draw_date', value: lab.draw_date || 'N/A' },
+                          { label: 'lab_type', value: lab.lab_type },
+                          { label: 'test_name', value: lab.test_name },
+                          { label: 'result_value', value: String(lab.result_value) },
+                          { label: 'unit', value: lab.unit },
+                          { label: 'reference_range', value: lab.reference_range },
+                          { label: 'result_flag', value: lab.result_flag },
+                          { label: 'ordering_provider', value: lab.ordering_provider },
+                          { label: 'lab_facility', value: lab.lab_facility },
+                          { label: 'status', value: lab.status },
+                          { label: 'clinical_note', value: lab.clinical_note },
+                        ]
+
+                        return (
+                          <details key={lab.lab_id} className="group rounded-lg border border-slate-200 bg-white">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(lab.test_name, 72)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {lab.lab_type} • {formatDate(lab.draw_date)} • {lab.result_value} {lab.unit}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>
+                                  {lab.result_flag}
+                                </span>
+                                <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              </div>
+                            </summary>
+
+                            <div className="border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                                {fields.map((field) => (
+                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </div>
                   )}
                 </>
               ) : null}

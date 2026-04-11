@@ -10,6 +10,10 @@ interface OverviewPageProps {
   selectedPatientDetail: PatientDetailApiRecord | null
   patientDetailLoading: boolean
   patientDetailError: string
+  careGapsLoading: boolean
+  careGapsError: string
+  labResultsLoading: boolean
+  labResultsError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]

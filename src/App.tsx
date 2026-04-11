@@ -4,7 +4,7 @@ import { QueuePage } from './pages/QueuePage'
 import { OverviewPage } from './pages/OverviewPage'
 import { DeepDivePage } from './pages/DeepDivePage'
 import { SummaryPage } from './pages/SummaryPage'
-import { loadDashboardData, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
+import { loadCareGaps, loadDashboardData, loadLabResults, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from './types/questions'
@@ -62,6 +62,12 @@ function App() {
   const [patientDetailsByMember, setPatientDetailsByMember] = useState<Record<string, PatientDetailApiRecord>>({})
   const [patientDetailsLoadingByMember, setPatientDetailsLoadingByMember] = useState<Record<string, boolean>>({})
   const [patientDetailsErrorByMember, setPatientDetailsErrorByMember] = useState<Record<string, string>>({})
+  const [careGapsByMember, setCareGapsByMember] = useState<Record<string, DashboardData['careGaps']>>({})
+  const [careGapsLoadingByMember, setCareGapsLoadingByMember] = useState<Record<string, boolean>>({})
+  const [careGapsErrorByMember, setCareGapsErrorByMember] = useState<Record<string, string>>({})
+  const [labResultsByMember, setLabResultsByMember] = useState<Record<string, DashboardData['labResults']>>({})
+  const [labResultsLoadingByMember, setLabResultsLoadingByMember] = useState<Record<string, boolean>>({})
+  const [labResultsErrorByMember, setLabResultsErrorByMember] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void (async () => {
@@ -105,6 +111,56 @@ function App() {
   }, [currentView, selectedMemberId, patientDetailsByMember])
 
   useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || careGapsByMember[selectedMemberId]) return
+
+    setCareGapsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setCareGapsErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const gaps = await loadCareGaps(selectedMemberId)
+        setCareGapsByMember((prev) => ({ ...prev, [selectedMemberId]: gaps }))
+      } catch (error) {
+        setCareGapsErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load care gaps',
+        }))
+      } finally {
+        setCareGapsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, careGapsByMember])
+
+  useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || labResultsByMember[selectedMemberId]) return
+
+    setLabResultsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setLabResultsErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const rows = await loadLabResults(selectedMemberId)
+        setLabResultsByMember((prev) => ({ ...prev, [selectedMemberId]: rows }))
+      } catch (error) {
+        setLabResultsErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load lab results',
+        }))
+      } finally {
+        setLabResultsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, labResultsByMember])
+
+  useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
 
     setCarePlanDraftByMember((prev) => {
@@ -137,14 +193,22 @@ function App() {
   const selectedMember = useMemo(() => members.find((member) => member.member_id === selectedMemberId) ?? null, [members, selectedMemberId])
 
   const selectedLabs = useMemo(
-    () => labResults
-      .filter((lab) => lab.member_id === selectedMemberId)
-      .sort((a, b) => new Date(b.draw_date).getTime() - new Date(a.draw_date).getTime()),
-    [labResults, selectedMemberId],
+    () => {
+      if (!selectedMemberId) return []
+      const apiLabs = labResultsByMember[selectedMemberId]
+      const source = apiLabs ?? labResults.filter((lab) => lab.member_id === selectedMemberId)
+      return source.slice().sort((a, b) => new Date(b.draw_date).getTime() - new Date(a.draw_date).getTime())
+    },
+    [labResults, labResultsByMember, selectedMemberId],
   )
 
   const selectedMeds = useMemo(() => medications.filter((medication) => medication.member_id === selectedMemberId), [medications, selectedMemberId])
-  const selectedGaps = useMemo(() => careGaps.filter((gap) => gap.member_id === selectedMemberId).sort((a, b) => gapPriorityRank[b.priority] - gapPriorityRank[a.priority]), [careGaps, selectedMemberId])
+  const selectedGaps = useMemo(() => {
+    if (!selectedMemberId) return []
+    const apiGaps = careGapsByMember[selectedMemberId]
+    if (apiGaps) return apiGaps.slice().sort((a, b) => gapPriorityRank[b.priority] - gapPriorityRank[a.priority])
+    return careGaps.filter((gap) => gap.member_id === selectedMemberId).sort((a, b) => gapPriorityRank[b.priority] - gapPriorityRank[a.priority])
+  }, [careGaps, careGapsByMember, selectedMemberId])
   const selectedAuths = useMemo(() => priorAuths.filter((auth) => auth.member_id === selectedMemberId), [priorAuths, selectedMemberId])
   const selectedClaims = useMemo(() => data?.insuranceClaims.filter((claim) => claim.member_id === selectedMemberId).sort((a, b) => new Date(b.date_of_service).getTime() - new Date(a.date_of_service).getTime()) ?? [], [data?.insuranceClaims, selectedMemberId])
   const selectedPharmacyClaims = useMemo(() => data?.pharmacyClaims.filter((claim) => claim.member_id === selectedMemberId).sort((a, b) => new Date(b.date_filled).getTime() - new Date(a.date_filled).getTime()) ?? [], [data?.pharmacyClaims, selectedMemberId])
@@ -218,6 +282,10 @@ function App() {
   const selectedPatientDetail = selectedMemberId ? (patientDetailsByMember[selectedMemberId] ?? null) : null
   const selectedPatientDetailLoading = selectedMemberId ? (patientDetailsLoadingByMember[selectedMemberId] ?? false) : false
   const selectedPatientDetailError = selectedMemberId ? (patientDetailsErrorByMember[selectedMemberId] ?? '') : ''
+  const selectedCareGapsLoading = selectedMemberId ? (careGapsLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedCareGapsError = selectedMemberId ? (careGapsErrorByMember[selectedMemberId] ?? '') : ''
+  const selectedLabResultsLoading = selectedMemberId ? (labResultsLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedLabResultsError = selectedMemberId ? (labResultsErrorByMember[selectedMemberId] ?? '') : ''
 
   function buildCarePlanDraft(memberId: string): CarePlanDraft {
     const patient = members.find((member) => member.member_id === memberId)
@@ -551,6 +619,10 @@ function App() {
                   selectedPatientDetail={selectedPatientDetail}
                   patientDetailLoading={selectedPatientDetailLoading}
                   patientDetailError={selectedPatientDetailError}
+                  careGapsLoading={selectedCareGapsLoading}
+                  careGapsError={selectedCareGapsError}
+                labResultsLoading={selectedLabResultsLoading}
+                labResultsError={selectedLabResultsError}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}

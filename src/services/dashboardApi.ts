@@ -1,4 +1,4 @@
-import type { DashboardData } from '../types/domain'
+import type { CareGap, DashboardData, LabResult } from '../types/domain'
 
 interface PatientApiRecord {
   member_id: string
@@ -38,6 +38,43 @@ export interface PatientDetailApiRecord {
   insurance_start_date: string | null
   risk_tier: string | null
   assigned_coordinator: string | null
+}
+
+interface CareGapApiRecord {
+  gap_id: string
+  member_id: string
+  patient_name: string
+  gender: string
+  age: number
+  gap_category: string
+  gap_description: string
+  clinical_guideline: string
+  last_completed_date: string | null
+  days_overdue: number
+  priority: string
+  recommended_action: string
+  gap_status: string
+  assigned_to: string
+  gap_notes: string | null
+}
+
+interface LabResultApiRecord {
+  lab_id: string
+  member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
+  draw_date: string
+  lab_type: string
+  test_name: string
+  result_value: number | string
+  unit: string
+  reference_range: string
+  result_flag: string
+  ordering_provider: string
+  lab_facility: string
+  status: string
+  clinical_note: string
 }
 
 const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? 'http://localhost:8000/api/v1/patients'
@@ -114,4 +151,114 @@ export async function loadPatientDetail(memberId: string): Promise<PatientDetail
   }
 
   return payload as PatientDetailApiRecord
+}
+
+function normalizeGapPriority(value: string): CareGap['priority'] {
+  if (value === 'Critical' || value === 'High' || value === 'Medium' || value === 'Low') return value
+  return 'Low'
+}
+
+function normalizeGapStatus(value: string): CareGap['gap_status'] {
+  if (value === 'Open' || value === 'In Progress' || value === 'Closed') return value
+  return 'Open'
+}
+
+function normalizeLabResultFlag(value: string): LabResult['result_flag'] {
+  if (value === 'Normal' || value === 'High' || value === 'Low' || value === 'Critical High' || value === 'Critical Low') return value
+  return 'Normal'
+}
+
+export async function loadCareGaps(memberId: string): Promise<CareGap[]> {
+  const urls = [
+    `http://localhost:8000/api/v1/care-gaps/${encodeURIComponent(memberId)}`,
+    `http://localhost:8000/api/v1/care-gaps?member_id=${encodeURIComponent(memberId)}`,
+  ]
+
+  let payload: unknown = null
+  let lastStatus = 0
+
+  for (const url of urls) {
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      lastStatus = response.status
+      continue
+    }
+
+    payload = await response.json()
+    break
+  }
+
+  if (payload == null) {
+    throw new Error(`Care gaps API failed with status ${lastStatus || 'unknown'}`)
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+
+  return rows
+    .filter((row): row is CareGapApiRecord => !!row && typeof row === 'object')
+    .map((row) => ({
+      gap_id: row.gap_id,
+      member_id: row.member_id,
+      patient_name: row.patient_name,
+      gender: row.gender,
+      age: Number(row.age ?? 0),
+      gap_category: row.gap_category,
+      gap_description: row.gap_description,
+      clinical_guideline: row.clinical_guideline,
+      last_completed_date: row.last_completed_date ?? '',
+      days_overdue: Number(row.days_overdue ?? 0),
+      priority: normalizeGapPriority(row.priority),
+      recommended_action: row.recommended_action,
+      gap_status: normalizeGapStatus(row.gap_status),
+      assigned_to: row.assigned_to,
+      gap_notes: row.gap_notes ?? '',
+    }))
+}
+
+export async function loadLabResults(memberId: string): Promise<LabResult[]> {
+  const urls = [
+    `http://localhost:8000/api/v1/lab-results/${encodeURIComponent(memberId)}`,
+    `http://localhost:8000/api/v1/lab-results?member_id=${encodeURIComponent(memberId)}`,
+  ]
+
+  let payload: unknown = null
+  let lastStatus = 0
+
+  for (const url of urls) {
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      lastStatus = response.status
+      continue
+    }
+
+    payload = await response.json()
+    break
+  }
+
+  if (payload == null) {
+    throw new Error(`Lab results API failed with status ${lastStatus || 'unknown'}`)
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+
+  return rows
+    .filter((row): row is LabResultApiRecord => !!row && typeof row === 'object')
+    .map((row) => ({
+      lab_id: row.lab_id,
+      member_id: row.member_id,
+      patient_name: row.patient_name,
+      gender: row.gender,
+      age: row.age,
+      draw_date: row.draw_date,
+      lab_type: row.lab_type,
+      test_name: row.test_name,
+      result_value: row.result_value,
+      unit: row.unit,
+      reference_range: row.reference_range,
+      result_flag: normalizeLabResultFlag(row.result_flag),
+      ordering_provider: row.ordering_provider,
+      lab_facility: row.lab_facility,
+      status: row.status,
+      clinical_note: row.clinical_note,
+    }))
 }
