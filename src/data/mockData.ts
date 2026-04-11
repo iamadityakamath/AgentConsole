@@ -16,6 +16,32 @@ const FULL_MEMBERS: MemberProfile[] = [
   { member_id: 'M-10003', patient_name: 'Priya Natarajan', age: 49, gender: 'Female', location: 'Edison, NJ' },
   { member_id: 'M-10004', patient_name: 'George Williams', age: 73, gender: 'Male', location: 'Detroit, MI' },
   { member_id: 'M-10005', patient_name: 'Fatima Rahman', age: 39, gender: 'Female', location: 'Columbus, OH' },
+  {
+    member_id: 'MBR-10013',
+    patient_name: 'Gloria Bennett',
+    age: 53,
+    gender: 'F',
+    location: 'Louisville, KY',
+    preferred_language: 'English',
+    preferred_contact_method: 'Phone',
+    primary_conditions: 'Depression, Anxiety',
+    insurance_plan_type: 'Dual Eligible Special Needs Plan (D-SNP)',
+    risk_tier: 'Tier 3 — Moderate',
+    assigned_coordinator: 'Maria Santos',
+  },
+  {
+    member_id: 'MBR-10014',
+    patient_name: 'Willie Jackson',
+    age: 69,
+    gender: 'M',
+    location: 'Milwaukee, WI',
+    preferred_language: 'English',
+    preferred_contact_method: 'Email',
+    primary_conditions: 'COPD, Hypertension',
+    insurance_plan_type: 'Medicaid Managed Care — Standard',
+    risk_tier: 'Tier 3 — Moderate',
+    assigned_coordinator: 'Robert Williams',
+  },
 ]
 
 const fullClaims: InsuranceClaim[] = [

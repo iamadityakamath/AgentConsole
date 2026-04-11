@@ -79,10 +79,18 @@ function truncateText(value: string, max = 60): string {
   return `${value.slice(0, max - 3)}...`
 }
 
+function contactMethodIcon(method: string): string {
+  const value = method.toLowerCase()
+  if (value.includes('email')) return '✉️'
+  if (value.includes('text')) return '💬'
+  return '📞'
+}
+
 interface TicketQueueViewProps {
   visibleTickets: TicketRow[]
   activeFilter: 'All' | SeverityLevel
   searchTerm: string
+  isLoading: boolean
   onFilterChange: (filter: 'All' | SeverityLevel) => void
   onSearchChange: (term: string) => void
   onBeginPrep: (memberId: string) => void
@@ -92,6 +100,7 @@ export function TicketQueueView({
   visibleTickets,
   activeFilter,
   searchTerm,
+  isLoading,
   onFilterChange,
   onSearchChange,
   onBeginPrep,
@@ -100,7 +109,12 @@ export function TicketQueueView({
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-slate-800">Ticket Queue</h2>
-        <p className="text-sm text-slate-500">{visibleTickets.length} visible tickets</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          {isLoading ? (
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-clinical-header" />
+          ) : null}
+          <p>{visibleTickets.length} visible tickets</p>
+        </div>
       </div>
 
       <div className="mb-4 flex items-center gap-3">
@@ -130,44 +144,49 @@ export function TicketQueueView({
       </div>
 
       <div className="space-y-3">
+        {isLoading ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Loading patients from API...
+          </div>
+        ) : null}
         {visibleTickets.map((ticket, idx) => (
           <article
             key={ticket.memberId}
-            className={`grid grid-cols-[1.9fr_1fr_1fr_1fr_1fr_0.9fr] items-center gap-4 rounded-lg border px-5 py-4 ${
+            className={`grid grid-cols-[2.2fr_1fr] items-center gap-4 rounded-lg border px-5 py-4 ${
               idx % 2 === 1 ? 'bg-clinical-row' : 'bg-white'
             }`}
           >
             <div>
               <p className="text-lg font-semibold leading-tight text-slate-900">{ticket.patientName}</p>
               <p className="text-xs text-slate-500">Member ID: {ticket.memberId}</p>
-              <p className="mt-2 text-sm text-slate-700">
-                {ticket.primaryConditions.slice(0, 2).join(' | ')}
+              <p className="mt-1 text-sm text-slate-700">{ticket.ageGender} • {ticket.location}</p>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${severityPillStyles[ticket.severityLevel]}`}>
+                  {ticket.riskTier}
+                </span>
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${ticket.preferredLanguage.toLowerCase() === 'english' ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-violet-300 bg-violet-100 text-violet-700'}`}>
+                  {ticket.preferredLanguage}
+                </span>
+                <span className="inline-flex rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700">
+                  {contactMethodIcon(ticket.preferredContactMethod)} {ticket.preferredContactMethod}
+                </span>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                {ticket.primaryConditions.slice(0, 3).map((condition) => (
+                  <span key={condition} className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                    {condition}
+                  </span>
+                ))}
+              </div>
+
+              <p className="mt-2 text-xs text-slate-600">
+                Coordinator: <span className="font-semibold text-slate-800">{ticket.assignedCoordinator}</span>
               </p>
-            </div>
-
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Severity</p>
-              <span
-                className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[ticket.severityLevel]}`}
-              >
-                {ticket.severityLevel} ({ticket.severityScore})
-              </span>
-            </div>
-
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Open Care Gaps</p>
-              <p className="mt-1 text-base font-semibold">{ticket.openCareGapsCount}</p>
-              <p className="text-xs text-slate-500">Critical Labs: {ticket.criticalLabFlags}</p>
-            </div>
-
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Last Contact</p>
-              <p className="mt-1 text-sm font-medium text-slate-700">{formatDate(ticket.lastContactDate)}</p>
-            </div>
-
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Non-Adherent Meds</p>
-              <p className="mt-1 text-base font-semibold text-red-700">{ticket.nonAdherentMedicationCount}</p>
+              <p className="text-xs text-slate-600">
+                Plan: <span className="font-medium text-slate-800">{ticket.insurancePlanLabel}</span>
+              </p>
             </div>
 
             <div className="text-right">

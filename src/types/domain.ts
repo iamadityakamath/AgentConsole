@@ -6,6 +6,12 @@ export interface MemberProfile {
   age: number
   gender: string
   location: string
+  preferred_language?: string
+  preferred_contact_method?: 'Phone' | 'Email' | 'Text' | string
+  primary_conditions?: string
+  risk_tier?: string
+  assigned_coordinator?: string
+  insurance_plan_type?: string
 }
 
 export interface InsuranceClaim {

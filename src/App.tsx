@@ -28,6 +28,7 @@ const gapPriorityRank: Record<string, number> = {
 function App() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [currentView, setCurrentView] = useState<AppView>('queue')
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<'All' | SeverityLevel>('All')
@@ -47,11 +48,28 @@ function App() {
 
   useEffect(() => {
     void (async () => {
-      const result = await loadDashboardData()
-      setData(result)
-      setLoading(false)
+      try {
+        const result = await loadDashboardData()
+        setData(result)
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : 'Failed to load patients API')
+      } finally {
+        setLoading(false)
+      }
     })()
   }, [])
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-clinical-bg px-6 py-8">
+        <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
+          <h2 className="text-xl font-semibold text-red-700">Unable to load patient data</h2>
+          <p className="mt-2 text-sm text-slate-700">{loadError}</p>
+          <p className="mt-1 text-sm text-slate-600">Expected endpoint: http://localhost:8000/api/v1/patients</p>
+        </div>
+      </div>
+    )
+  }
 
   useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
@@ -80,6 +98,7 @@ function App() {
 
   const allTickets: TicketRow[] = useMemo(() => (data ? buildTickets(data) : []), [data])
   const visibleTickets = useMemo(() => filterTickets(allTickets, activeFilter, searchTerm), [allTickets, activeFilter, searchTerm])
+  const activeTicketCount = loading ? 0 : allTickets.length
 
   const selectedTicket = useMemo(() => allTickets.find((ticket) => ticket.memberId === selectedMemberId) ?? null, [allTickets, selectedMemberId])
   const selectedMember = useMemo(() => members.find((member) => member.member_id === selectedMemberId) ?? null, [members, selectedMemberId])
@@ -418,16 +437,6 @@ function App() {
     setDraftToastVisible(false)
   }
 
-  if (loading || !data) {
-    return (
-      <div className="min-h-screen bg-clinical-bg px-6 py-8">
-        <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] rounded-2xl bg-white p-8 shadow-sm">
-          <p className="text-slate-700">Loading care coordination dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-
   const summaryDraft = currentCarePlanDraft ?? (selectedMemberId ? buildCarePlanDraft(selectedMemberId) : null)
 
   return (
@@ -441,7 +450,7 @@ function App() {
             </div>
             <div className="text-right">
               <p className="text-sm text-blue-100">{new Date().toLocaleDateString()}</p>
-              <span className="mt-2 inline-flex rounded-full bg-white px-3 py-1 text-sm font-semibold text-clinical-header">8 Active Tickets Today</span>
+              <span className="mt-2 inline-flex rounded-full bg-white px-3 py-1 text-sm font-semibold text-clinical-header">{activeTicketCount} Active Tickets Today</span>
             </div>
           </div>
 
@@ -469,6 +478,7 @@ function App() {
                 visibleTickets={visibleTickets}
                 activeFilter={activeFilter}
                 searchTerm={searchTerm}
+                isLoading={loading}
                 onFilterChange={setActiveFilter}
                 onSearchChange={setSearchTerm}
                 onBeginPrep={beginPrep}
