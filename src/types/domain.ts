@@ -52,6 +52,10 @@ export interface PharmacyClaim {
 export interface EhrNote {
   note_id: string
   member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
+  location?: string
   note_date: string
   note_type: string
   provider_name: string
@@ -108,6 +112,9 @@ export interface Medication {
 export interface PriorAuthorization {
   auth_id: string
   member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
   request_date: string
   auth_type: string
   service_requested: string

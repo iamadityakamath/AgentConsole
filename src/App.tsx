@@ -4,7 +4,16 @@ import { QueuePage } from './pages/QueuePage'
 import { OverviewPage } from './pages/OverviewPage'
 import { DeepDivePage } from './pages/DeepDivePage'
 import { SummaryPage } from './pages/SummaryPage'
-import { loadCareGaps, loadDashboardData, loadLabResults, loadMedications, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
+import {
+  loadCareGaps,
+  loadDashboardData,
+  loadEhrNotes,
+  loadLabResults,
+  loadMedications,
+  loadPatientDetail,
+  loadPriorAuthorizations,
+  type PatientDetailApiRecord,
+} from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from './types/questions'
@@ -71,6 +80,12 @@ function App() {
   const [medicationsByMember, setMedicationsByMember] = useState<Record<string, DashboardData['medications']>>({})
   const [medicationsLoadingByMember, setMedicationsLoadingByMember] = useState<Record<string, boolean>>({})
   const [medicationsErrorByMember, setMedicationsErrorByMember] = useState<Record<string, string>>({})
+  const [priorAuthsByMember, setPriorAuthsByMember] = useState<Record<string, DashboardData['priorAuths']>>({})
+  const [priorAuthsLoadingByMember, setPriorAuthsLoadingByMember] = useState<Record<string, boolean>>({})
+  const [priorAuthsErrorByMember, setPriorAuthsErrorByMember] = useState<Record<string, string>>({})
+  const [ehrNotesByMember, setEhrNotesByMember] = useState<Record<string, DashboardData['ehrNotes']>>({})
+  const [ehrNotesLoadingByMember, setEhrNotesLoadingByMember] = useState<Record<string, boolean>>({})
+  const [ehrNotesErrorByMember, setEhrNotesErrorByMember] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void (async () => {
@@ -189,6 +204,56 @@ function App() {
   }, [currentView, selectedMemberId, medicationsByMember])
 
   useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || priorAuthsByMember[selectedMemberId]) return
+
+    setPriorAuthsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setPriorAuthsErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const rows = await loadPriorAuthorizations(selectedMemberId)
+        setPriorAuthsByMember((prev) => ({ ...prev, [selectedMemberId]: rows }))
+      } catch (error) {
+        setPriorAuthsErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load prior authorizations',
+        }))
+      } finally {
+        setPriorAuthsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, priorAuthsByMember])
+
+  useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || ehrNotesByMember[selectedMemberId]) return
+
+    setEhrNotesLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setEhrNotesErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const rows = await loadEhrNotes(selectedMemberId)
+        setEhrNotesByMember((prev) => ({ ...prev, [selectedMemberId]: rows }))
+      } catch (error) {
+        setEhrNotesErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load EHR notes',
+        }))
+      } finally {
+        setEhrNotesLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, ehrNotesByMember])
+
+  useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
 
     setCarePlanDraftByMember((prev) => {
@@ -240,10 +305,17 @@ function App() {
     if (apiGaps) return apiGaps.slice().sort((a, b) => gapPriorityRank[b.priority] - gapPriorityRank[a.priority])
     return careGaps.filter((gap) => gap.member_id === selectedMemberId).sort((a, b) => gapPriorityRank[b.priority] - gapPriorityRank[a.priority])
   }, [careGaps, careGapsByMember, selectedMemberId])
-  const selectedAuths = useMemo(() => priorAuths.filter((auth) => auth.member_id === selectedMemberId), [priorAuths, selectedMemberId])
+  const selectedAuths = useMemo(() => {
+    if (!selectedMemberId) return []
+    return priorAuthsByMember[selectedMemberId] ?? priorAuths.filter((auth) => auth.member_id === selectedMemberId)
+  }, [priorAuths, priorAuthsByMember, selectedMemberId])
   const selectedClaims = useMemo(() => data?.insuranceClaims.filter((claim) => claim.member_id === selectedMemberId).sort((a, b) => new Date(b.date_of_service).getTime() - new Date(a.date_of_service).getTime()) ?? [], [data?.insuranceClaims, selectedMemberId])
   const selectedPharmacyClaims = useMemo(() => data?.pharmacyClaims.filter((claim) => claim.member_id === selectedMemberId).sort((a, b) => new Date(b.date_filled).getTime() - new Date(a.date_filled).getTime()) ?? [], [data?.pharmacyClaims, selectedMemberId])
-  const selectedNotes = useMemo(() => data?.ehrNotes.filter((note) => note.member_id === selectedMemberId).sort((a, b) => new Date(b.note_date).getTime() - new Date(a.note_date).getTime()) ?? [], [data?.ehrNotes, selectedMemberId])
+  const selectedNotes = useMemo(() => {
+    if (!selectedMemberId) return []
+    const source = ehrNotesByMember[selectedMemberId] ?? data?.ehrNotes.filter((note) => note.member_id === selectedMemberId) ?? []
+    return source.slice().sort((a, b) => new Date(b.note_date).getTime() - new Date(a.note_date).getTime())
+  }, [data?.ehrNotes, ehrNotesByMember, selectedMemberId])
 
   const generatedQuestions = useMemo(
     () => generateSuggestedQuestions({ medications: selectedMeds, labs: selectedLabs, gaps: selectedGaps, priorAuths: selectedAuths }),
@@ -319,6 +391,10 @@ function App() {
   const selectedLabResultsError = selectedMemberId ? (labResultsErrorByMember[selectedMemberId] ?? '') : ''
   const selectedMedicationsLoading = selectedMemberId ? (medicationsLoadingByMember[selectedMemberId] ?? false) : false
   const selectedMedicationsError = selectedMemberId ? (medicationsErrorByMember[selectedMemberId] ?? '') : ''
+  const selectedPriorAuthsLoading = selectedMemberId ? (priorAuthsLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedPriorAuthsError = selectedMemberId ? (priorAuthsErrorByMember[selectedMemberId] ?? '') : ''
+  const selectedEhrNotesLoading = selectedMemberId ? (ehrNotesLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedEhrNotesError = selectedMemberId ? (ehrNotesErrorByMember[selectedMemberId] ?? '') : ''
 
   function buildCarePlanDraft(memberId: string): CarePlanDraft {
     const patient = members.find((member) => member.member_id === memberId)
@@ -658,6 +734,10 @@ function App() {
                 labResultsError={selectedLabResultsError}
                 medicationsLoading={selectedMedicationsLoading}
                 medicationsError={selectedMedicationsError}
+                priorAuthsLoading={selectedPriorAuthsLoading}
+                priorAuthsError={selectedPriorAuthsError}
+                ehrNotesLoading={selectedEhrNotesLoading}
+                ehrNotesError={selectedEhrNotesError}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}

@@ -218,6 +218,10 @@ interface OverviewViewProps {
   labResultsError: string
   medicationsLoading: boolean
   medicationsError: string
+  priorAuthsLoading: boolean
+  priorAuthsError: string
+  ehrNotesLoading: boolean
+  ehrNotesError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
@@ -255,6 +259,10 @@ export function OverviewView({
   labResultsError,
   medicationsLoading,
   medicationsError,
+  priorAuthsLoading,
+  priorAuthsError,
+  ehrNotesLoading,
+  ehrNotesError,
   selectedNotes,
   selectedLabs,
   selectedMeds,
@@ -625,17 +633,67 @@ export function OverviewView({
               {activePanel === 'auths' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Prior Auth History</h3>
-                  {selectedAuths.length === 0 ? (
+                  {priorAuthsLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading prior authorizations...</p>
+                  ) : null}
+                  {!priorAuthsLoading && priorAuthsError ? (
+                    <p className="mt-2 text-sm text-red-700">{priorAuthsError}</p>
+                  ) : null}
+                  {!priorAuthsLoading && !priorAuthsError && selectedAuths.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No prior authorization history on file.</p>
                   ) : (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {selectedAuths.map((auth) => (
-                        <li key={auth.auth_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                          <p className="font-medium text-slate-800">{auth.service_requested}</p>
-                          <p className="text-xs text-slate-600">{auth.auth_type} • {auth.decision}</p>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-2 space-y-3 pr-1 text-sm">
+                      {selectedAuths.map((auth) => {
+                        const fields: Array<{ label: string; value: string }> = [
+                          { label: 'auth_id', value: auth.auth_id },
+                          { label: 'member_id', value: auth.member_id },
+                          { label: 'patient_name', value: auth.patient_name ?? 'N/A' },
+                          { label: 'gender', value: auth.gender ?? 'N/A' },
+                          { label: 'age', value: auth.age == null ? 'N/A' : String(auth.age) },
+                          { label: 'request_date', value: auth.request_date || 'N/A' },
+                          { label: 'auth_type', value: auth.auth_type },
+                          { label: 'service_requested', value: auth.service_requested },
+                          { label: 'requesting_provider', value: auth.requesting_provider },
+                          { label: 'decision', value: auth.decision },
+                          { label: 'decision_date', value: auth.decision_date || 'N/A' },
+                          { label: 'valid_from', value: auth.valid_from || 'N/A' },
+                          { label: 'valid_through', value: auth.valid_through || 'N/A' },
+                          { label: 'denial_reason', value: auth.denial_reason || 'N/A' },
+                          { label: 'appeal_status', value: auth.appeal_status || 'N/A' },
+                          { label: 'auth_notes', value: auth.auth_notes || 'N/A' },
+                        ]
+
+                        return (
+                          <details key={auth.auth_id} className="group rounded-lg border border-slate-200 bg-white">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(auth.service_requested, 72)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {auth.auth_type} • {formatDate(auth.request_date)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${auth.decision === 'Denied' ? 'border-red-200 bg-red-50 text-red-700' : auth.decision === 'Pending' ? 'border-amber-200 bg-amber-50 text-amber-700' : auth.decision === 'Appealed' ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                  {auth.decision}
+                                </span>
+                                <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              </div>
+                            </summary>
+
+                            <div className="border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                                {fields.map((field) => (
+                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </div>
                   )}
                 </>
               ) : null}
@@ -643,17 +701,63 @@ export function OverviewView({
               {activePanel === 'notes' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">EHR Clinical Notes</h3>
-                  {selectedNotes.length === 0 ? (
+                  {ehrNotesLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading EHR notes...</p>
+                  ) : null}
+                  {!ehrNotesLoading && ehrNotesError ? (
+                    <p className="mt-2 text-sm text-red-700">{ehrNotesError}</p>
+                  ) : null}
+                  {!ehrNotesLoading && !ehrNotesError && selectedNotes.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No EHR notes on file for this patient.</p>
                   ) : (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {selectedNotes.slice(0, 8).map((note) => (
-                        <li key={note.note_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                          <p className="font-medium text-slate-800">{note.primary_diagnosis}</p>
-                          <p className="text-xs text-slate-600">{note.note_type} • {formatDate(note.note_date)}</p>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-2 space-y-3 pr-1 text-sm">
+                      {selectedNotes.map((note) => {
+                        const fields: Array<{ label: string; value: string }> = [
+                          { label: 'note_id', value: note.note_id },
+                          { label: 'member_id', value: note.member_id },
+                          { label: 'patient_name', value: note.patient_name ?? 'N/A' },
+                          { label: 'gender', value: note.gender ?? 'N/A' },
+                          { label: 'age', value: note.age == null ? 'N/A' : String(note.age) },
+                          { label: 'location', value: note.location ?? 'N/A' },
+                          { label: 'note_date', value: note.note_date || 'N/A' },
+                          { label: 'note_type', value: note.note_type },
+                          { label: 'provider_name', value: note.provider_name },
+                          { label: 'facility_name', value: note.facility_name },
+                          { label: 'icd_code', value: note.icd_code },
+                          { label: 'primary_diagnosis', value: note.primary_diagnosis },
+                          { label: 'subjective', value: note.subjective },
+                          { label: 'objective', value: note.objective },
+                          { label: 'assessment', value: note.assessment },
+                          { label: 'plan', value: note.plan },
+                          { label: 'follow_up_date', value: note.follow_up_date || 'N/A' },
+                        ]
+
+                        return (
+                          <details key={note.note_id} className="group rounded-lg border border-slate-200 bg-white">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(note.primary_diagnosis, 72)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {note.note_type} • {formatDate(note.note_date)}
+                                </p>
+                              </div>
+                              <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                            </summary>
+
+                            <div className="border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                                {fields.map((field) => (
+                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </div>
                   )}
                 </>
               ) : null}

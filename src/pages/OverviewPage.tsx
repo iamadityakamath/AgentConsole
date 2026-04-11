@@ -16,6 +16,10 @@ interface OverviewPageProps {
   labResultsError: string
   medicationsLoading: boolean
   medicationsError: string
+  priorAuthsLoading: boolean
+  priorAuthsError: string
+  ehrNotesLoading: boolean
+  ehrNotesError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]

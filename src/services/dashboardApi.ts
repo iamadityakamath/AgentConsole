@@ -1,4 +1,4 @@
-import type { CareGap, DashboardData, LabResult, Medication } from '../types/domain'
+import type { CareGap, DashboardData, LabResult, Medication, PriorAuthorization } from '../types/domain'
 
 interface PatientApiRecord {
   member_id: string
@@ -98,6 +98,45 @@ interface MedicationApiRecord {
   rx_notes: string
 }
 
+interface PriorAuthorizationApiRecord {
+  auth_id: string
+  member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
+  request_date: string
+  auth_type: string
+  service_requested: string
+  requesting_provider: string
+  decision: string
+  decision_date: string | null
+  valid_from: string | null
+  valid_through: string | null
+  denial_reason: string | null
+  appeal_status: string | null
+  auth_notes: string | null
+}
+
+interface EhrNoteApiRecord {
+  note_id: string
+  member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
+  location?: string
+  note_date: string
+  note_type: string
+  provider_name: string
+  facility_name: string
+  icd_code: string
+  primary_diagnosis: string
+  subjective: string
+  objective: string
+  assessment: string
+  plan: string
+  follow_up_date: string | null
+}
+
 const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? 'http://localhost:8000/api/v1/patients'
 const REQUEST_TIMEOUT_MS = 10000
 
@@ -192,6 +231,11 @@ function normalizeLabResultFlag(value: string): LabResult['result_flag'] {
 function normalizeMedicationAdherence(value: string): Medication['adherence_status'] {
   if (value === 'Adherent' || value === 'Partially Adherent' || value === 'Non-Adherent' || value === 'On Hold' || value === 'Discontinued') return value
   return 'Adherent'
+}
+
+function normalizePriorAuthDecision(value: string): PriorAuthorization['decision'] {
+  if (value === 'Approved' || value === 'Denied' || value === 'Pending' || value === 'Appealed') return value
+  return 'Pending'
 }
 
 export async function loadCareGaps(memberId: string): Promise<CareGap[]> {
@@ -336,5 +380,102 @@ export async function loadMedications(memberId: string): Promise<Medication[]> {
       adherence_status: normalizeMedicationAdherence(row.adherence_status),
       medication_status: row.medication_status,
       rx_notes: row.rx_notes,
+    }))
+}
+
+export async function loadPriorAuthorizations(memberId: string): Promise<PriorAuthorization[]> {
+  const urls = [
+    `http://localhost:8000/api/v1/prior-auth/${encodeURIComponent(memberId)}`,
+    `http://localhost:8000/api/v1/prior-auth?member_id=${encodeURIComponent(memberId)}`,
+  ]
+
+  let payload: unknown = null
+  let lastStatus = 0
+
+  for (const url of urls) {
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      lastStatus = response.status
+      continue
+    }
+
+    payload = await response.json()
+    break
+  }
+
+  if (payload == null) {
+    throw new Error(`Prior auth API failed with status ${lastStatus || 'unknown'}`)
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+
+  return rows
+    .filter((row): row is PriorAuthorizationApiRecord => !!row && typeof row === 'object')
+    .map((row) => ({
+      auth_id: row.auth_id,
+      member_id: row.member_id,
+      patient_name: row.patient_name,
+      gender: row.gender,
+      age: row.age,
+      request_date: row.request_date,
+      auth_type: row.auth_type,
+      service_requested: row.service_requested,
+      requesting_provider: row.requesting_provider,
+      decision: normalizePriorAuthDecision(row.decision),
+      decision_date: row.decision_date ?? '',
+      valid_from: row.valid_from ?? '',
+      valid_through: row.valid_through ?? '',
+      denial_reason: row.denial_reason ?? '',
+      appeal_status: row.appeal_status ?? '',
+      auth_notes: row.auth_notes ?? '',
+    }))
+}
+
+export async function loadEhrNotes(memberId: string): Promise<DashboardData['ehrNotes']> {
+  const urls = [
+    `http://localhost:8000/api/v1/ehr-notes/${encodeURIComponent(memberId)}`,
+    `http://localhost:8000/api/v1/ehr-notes?member_id=${encodeURIComponent(memberId)}`,
+  ]
+
+  let payload: unknown = null
+  let lastStatus = 0
+
+  for (const url of urls) {
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      lastStatus = response.status
+      continue
+    }
+
+    payload = await response.json()
+    break
+  }
+
+  if (payload == null) {
+    throw new Error(`EHR notes API failed with status ${lastStatus || 'unknown'}`)
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+
+  return rows
+    .filter((row): row is EhrNoteApiRecord => !!row && typeof row === 'object')
+    .map((row) => ({
+      note_id: row.note_id,
+      member_id: row.member_id,
+      patient_name: row.patient_name,
+      gender: row.gender,
+      age: row.age,
+      location: row.location,
+      note_date: row.note_date,
+      note_type: row.note_type,
+      provider_name: row.provider_name,
+      facility_name: row.facility_name,
+      icd_code: row.icd_code,
+      primary_diagnosis: row.primary_diagnosis,
+      subjective: row.subjective,
+      objective: row.objective,
+      assessment: row.assessment,
+      plan: row.plan,
+      follow_up_date: row.follow_up_date ?? '',
     }))
 }
