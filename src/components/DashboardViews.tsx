@@ -1,0 +1,1183 @@
+import type {
+  CareGap,
+  EhrNote,
+  InsuranceClaim,
+  LabResult,
+  Medication,
+  MemberProfile,
+  PriorAuthorization,
+  SeverityLevel,
+} from '../types/domain'
+import type { TicketRow } from '../types/dashboard'
+import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
+import {
+  deepDiveSections,
+  deepDiveStatusStyles,
+  type CarePlanDraft,
+  type DeepDiveQuestionResponse,
+  type DeepDiveSectionId,
+} from '../types/callWorkflow'
+import {
+  formatSectionQuestionCount,
+  statusIsComplete,
+} from '../utils/callWorkflow'
+
+const severityPillStyles: Record<SeverityLevel, string> = {
+  Critical: 'bg-red-100 text-red-700 border-red-200',
+  High: 'bg-amber-100 text-amber-700 border-amber-200',
+  Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  Low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+}
+
+const labFlagStyles: Record<string, string> = {
+  Normal: 'text-emerald-700',
+  High: 'text-amber-700',
+  Low: 'text-blue-700',
+  'Critical High': 'font-semibold text-red-700',
+  'Critical Low': 'font-semibold text-red-700',
+}
+
+const adherenceStyles: Record<string, string> = {
+  Adherent: 'text-emerald-700',
+  'Partially Adherent': 'text-amber-700',
+  'Non-Adherent': 'text-red-700',
+  'On Hold': 'text-slate-500',
+  Discontinued: 'text-slate-500',
+}
+
+const categoryBorderStyles: Record<string, string> = {
+  Medication: 'border-blue-500',
+  Labs: 'border-red-500',
+  'Care Gaps': 'border-orange-500',
+  'Prior Auth': 'border-purple-500',
+  Social: 'border-emerald-500',
+  Utilization: 'border-teal-500',
+}
+
+const gapPriorityStyles: Record<string, string> = {
+  Critical: 'bg-red-100 text-red-700 border-red-200',
+  High: 'bg-amber-100 text-amber-700 border-amber-200',
+  Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  Low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return 'No contact recorded'
+  return new Date(value).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
+}
+
+function truncateText(value: string, max = 60): string {
+  if (value.length <= max) return value
+  return `${value.slice(0, max - 3)}...`
+}
+
+interface TicketQueueViewProps {
+  visibleTickets: TicketRow[]
+  activeFilter: 'All' | SeverityLevel
+  searchTerm: string
+  onFilterChange: (filter: 'All' | SeverityLevel) => void
+  onSearchChange: (term: string) => void
+  onBeginPrep: (memberId: string) => void
+}
+
+export function TicketQueueView({
+  visibleTickets,
+  activeFilter,
+  searchTerm,
+  onFilterChange,
+  onSearchChange,
+  onBeginPrep,
+}: TicketQueueViewProps) {
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-slate-800">Ticket Queue</h2>
+        <p className="text-sm text-slate-500">{visibleTickets.length} visible tickets</p>
+      </div>
+
+      <div className="mb-4 flex items-center gap-3">
+        {(['All', 'Critical', 'High', 'Medium', 'Low'] as const).map((filter) => (
+          <button
+            key={filter}
+            onClick={() => onFilterChange(filter)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+              activeFilter === filter
+                ? 'border-clinical-header bg-clinical-header text-white'
+                : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+            }`}
+          >
+            {filter}
+          </button>
+        ))}
+
+        <div className="ml-auto">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search by patient name or member ID"
+            className="w-[320px] rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {visibleTickets.map((ticket, idx) => (
+          <article
+            key={ticket.memberId}
+            className={`grid grid-cols-[1.9fr_1fr_1fr_1fr_1fr_0.9fr] items-center gap-4 rounded-lg border px-5 py-4 ${
+              idx % 2 === 1 ? 'bg-clinical-row' : 'bg-white'
+            }`}
+          >
+            <div>
+              <p className="text-lg font-semibold leading-tight text-slate-900">{ticket.patientName}</p>
+              <p className="text-xs text-slate-500">Member ID: {ticket.memberId}</p>
+              <p className="mt-2 text-sm text-slate-700">
+                {ticket.primaryConditions.slice(0, 2).join(' | ')}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Severity</p>
+              <span
+                className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[ticket.severityLevel]}`}
+              >
+                {ticket.severityLevel} ({ticket.severityScore})
+              </span>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Open Care Gaps</p>
+              <p className="mt-1 text-base font-semibold">{ticket.openCareGapsCount}</p>
+              <p className="text-xs text-slate-500">Critical Labs: {ticket.criticalLabFlags}</p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Last Contact</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">{formatDate(ticket.lastContactDate)}</p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Non-Adherent Meds</p>
+              <p className="mt-1 text-base font-semibold text-red-700">{ticket.nonAdherentMedicationCount}</p>
+            </div>
+
+            <div className="text-right">
+              <button
+                onClick={() => onBeginPrep(ticket.memberId)}
+                className="rounded-md bg-clinical-header px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                Start Call Prep
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+interface OverviewViewProps {
+  selectedMember: MemberProfile | null
+  selectedTicket: TicketRow | null
+  selectedLabs: LabResult[]
+  selectedMeds: Medication[]
+  selectedGaps: CareGap[]
+  selectedAuths: PriorAuthorization[]
+  visibleQuestions: SuggestedQuestion[]
+  questionStateForMember: Record<string, QuestionUIState>
+  newQuestionText: string
+  newQuestionCategory: QuestionCategory
+  draggingQuestionId: string | null
+  dragOverQuestionId: string | null
+  onQuestionStateChange: (questionId: string, patch: Partial<QuestionUIState>) => void
+  onFilterChange?: never
+  onSearchChange?: never
+  onBeginCall: () => void
+  onNewQuestionTextChange: (value: string) => void
+  onNewQuestionCategoryChange: (category: QuestionCategory) => void
+  onAddCustomQuestion: () => void
+  onDragStart: (questionId: string) => void
+  onDragOver: (questionId: string) => void
+  onDrop: (questionId: string) => void
+  onDragEnd: () => void
+  onSkipQuestion: (questionId: string) => void
+}
+
+export function OverviewView({
+  selectedMember,
+  selectedTicket,
+  selectedLabs,
+  selectedMeds,
+  selectedGaps,
+  selectedAuths,
+  visibleQuestions,
+  questionStateForMember,
+  newQuestionText,
+  newQuestionCategory,
+  draggingQuestionId,
+  dragOverQuestionId,
+  onQuestionStateChange,
+  onBeginCall,
+  onNewQuestionTextChange,
+  onNewQuestionCategoryChange,
+  onAddCustomQuestion,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onSkipQuestion,
+}: OverviewViewProps) {
+  return (
+    <div className="grid h-full grid-cols-5 gap-5">
+      {!selectedMember || !selectedTicket ? (
+        <div className="col-span-5 flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-800">No Patient Selected</h2>
+            <p className="mt-2 text-slate-600">Choose Start Call Prep from the Ticket Queue to generate a personalized call plan.</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-lg bg-white p-4 shadow-sm">
+              <h2 className="text-xl font-semibold text-slate-900">{selectedMember.patient_name}</h2>
+              <p className="text-sm text-slate-500">Member ID: {selectedMember.member_id}</p>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember.age} years, {selectedMember.gender}, {selectedMember.location}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[selectedTicket.severityLevel]}`}>
+                  {selectedTicket.severityLevel}
+                </span>
+                <span className="text-xs text-slate-500">Primary: {selectedTicket.primaryConditions.join(' | ')}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Open Care Gaps</p>
+                <p className={`mt-1 text-xl font-semibold ${selectedGaps.filter((g) => g.gap_status === 'Open').length > 3 ? 'text-red-700' : 'text-slate-800'}`}>
+                  {selectedGaps.filter((g) => g.gap_status === 'Open').length}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Non-Adherent Meds</p>
+                <p className={`mt-1 text-xl font-semibold ${selectedMeds.filter((m) => m.adherence_status === 'Non-Adherent').length > 0 ? 'text-red-700' : 'text-slate-800'}`}>
+                  {selectedMeds.filter((m) => m.adherence_status === 'Non-Adherent').length}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Critical Lab Flags</p>
+                <p className={`mt-1 text-xl font-semibold ${selectedLabs.filter((l) => l.result_flag === 'Critical High' || l.result_flag === 'Critical Low').length > 0 ? 'text-red-700' : 'text-slate-800'}`}>
+                  {selectedLabs.filter((l) => l.result_flag === 'Critical High' || l.result_flag === 'Critical Low').length}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Pending/Denied Auths</p>
+                <p className={`mt-1 text-xl font-semibold ${selectedAuths.filter((a) => a.decision === 'Pending' || a.decision === 'Denied').length > 0 ? 'text-amber-700' : 'text-slate-800'}`}>
+                  {selectedAuths.filter((a) => a.decision === 'Pending' || a.decision === 'Denied').length}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Most Recent Lab Results</h3>
+              {selectedLabs.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
+              ) : (
+                <table className="mt-2 w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-xs text-slate-500">
+                      <th className="py-1 font-medium">Test Name</th>
+                      <th className="py-1 font-medium">Result</th>
+                      <th className="py-1 font-medium">Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedLabs.slice(0, 5).map((lab, idx) => (
+                      <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
+                        <td className="px-1 py-1.5">{lab.test_name}</td>
+                        <td className="px-1 py-1.5">{lab.result_value} {lab.unit}</td>
+                        <td className={`px-1 py-1.5 ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Active Medications Summary</h3>
+              {selectedMeds.filter((m) => m.medication_status === 'Active').length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No active medications on file for this patient.</p>
+              ) : (
+                <ul className="mt-2 space-y-2 text-sm">
+                  {selectedMeds.filter((m) => m.medication_status === 'Active').map((med) => (
+                    <li key={med.med_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <p className="font-medium text-slate-800">{med.drug_name} {med.dosage} - {med.frequency}</p>
+                      <p className={`text-xs ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>{med.adherence_status}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Open Care Gaps Summary</h3>
+              {selectedGaps.filter((gap) => gap.gap_status === 'Open').length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
+              ) : (
+                <ul className="mt-2 space-y-2 text-sm">
+                  {selectedGaps.filter((gap) => gap.gap_status === 'Open').map((gap) => (
+                    <li key={gap.gap_id} className="flex items-center justify-between gap-3 rounded border border-slate-200 px-2 py-1.5">
+                      <span className="text-slate-700">{truncateText(gap.gap_description, 60)}</span>
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
+                        {gap.priority}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="col-span-3 flex flex-col rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
+              <p className="text-sm text-slate-500">
+                {visibleQuestions.filter((q) => questionStateForMember[q.id]?.checked).length}/{visibleQuestions.length} covered
+              </p>
+            </div>
+
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Custom Question</p>
+              <div className="flex items-center gap-2">
+                <select
+                  value={newQuestionCategory}
+                  onChange={(event) => onNewQuestionCategoryChange(event.target.value as QuestionCategory)}
+                  className="w-[140px] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-clinical-header"
+                >
+                  <option value="Social">Social</option>
+                  <option value="Care Gaps">Care Gaps</option>
+                  <option value="Labs">Labs</option>
+                  <option value="Medication">Medication</option>
+                  <option value="Prior Auth">Prior Auth</option>
+                  <option value="Utilization">Utilization</option>
+                </select>
+                <input
+                  type="text"
+                  value={newQuestionText}
+                  onChange={(event) => onNewQuestionTextChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      onAddCustomQuestion()
+                    }
+                  }}
+                  placeholder="Type a custom question for this patient"
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
+                />
+                <button
+                  onClick={onAddCustomQuestion}
+                  className="rounded-md bg-clinical-header px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[640px] flex-1 space-y-2 overflow-auto pr-1">
+              {visibleQuestions.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+                  All questions are currently skipped. Return to Ticket Queue and choose another member or continue to Begin Call.
+                </div>
+              ) : (
+                visibleQuestions.map((question) => (
+                  <article
+                    key={question.id}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      onDragOver(question.id)
+                    }}
+                    onDrop={() => onDrop(question.id)}
+                    className={`group rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]} ${
+                      draggingQuestionId === question.id ? 'opacity-50' : ''
+                    } ${dragOverQuestionId === question.id ? 'ring-2 ring-clinical-header/40' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          onDragStart(question.id)
+                          event.dataTransfer.effectAllowed = 'move'
+                        }}
+                        onDragEnd={onDragEnd}
+                        className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+                        title="Drag from handle to reorder"
+                        aria-label="Drag handle"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                          <circle cx="4" cy="3" r="1" />
+                          <circle cx="10" cy="3" r="1" />
+                          <circle cx="4" cy="7" r="1" />
+                          <circle cx="10" cy="7" r="1" />
+                          <circle cx="4" cy="11" r="1" />
+                          <circle cx="10" cy="11" r="1" />
+                        </svg>
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4"
+                        checked={questionStateForMember[question.id]?.checked ?? false}
+                        onChange={(event) => onQuestionStateChange(question.id, { checked: event.target.checked })}
+                      />
+                      <div className="flex-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
+                        <p className="mt-1 text-sm text-slate-800">{question.text}</p>
+                      </div>
+                      <button
+                        onClick={() => onSkipQuestion(question.id)}
+                        className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
+                      >
+                        Skip
+                      </button>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 border-t border-slate-200 pt-4 text-right">
+              <button
+                onClick={onBeginCall}
+                className="rounded-md bg-clinical-header px-6 py-3 text-base font-semibold text-white transition hover:brightness-110"
+              >
+                Begin Call {'->'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+interface DeepDiveViewProps {
+  selectedMember: MemberProfile | null
+  selectedNotes: EhrNote[]
+  selectedLabs: LabResult[]
+  selectedMeds: Medication[]
+  selectedGaps: CareGap[]
+  selectedAuths: PriorAuthorization[]
+  selectedClaims: InsuranceClaim[]
+  selectedPharmacyClaims: Array<{
+    rx_claim_id: string
+    date_filled: string
+    drug_name: string
+    dosage: string
+    days_supply: number
+    prescribing_provider: string
+    pharmacy_name: string
+    copay_amount: number
+    plan_paid_amount: number
+    fill_status: string
+  }>
+  activeDeepDiveSection: DeepDiveSectionId
+  sectionQuestions: Record<DeepDiveSectionId, SuggestedQuestion[]>
+  deepDiveResponses: Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>
+  supervisorNotes: string[]
+  onSetActiveSection: (sectionId: DeepDiveSectionId) => void
+  onUpdateQuestion: (sectionId: DeepDiveSectionId, questionId: string, patch: Partial<DeepDiveQuestionResponse>) => void
+  onFlagForSupervisor: () => void
+  onCompleteCall: () => void
+  getSectionProgress: (sectionId: DeepDiveSectionId) => { total: number; completed: number; allComplete: boolean }
+}
+
+export function DeepDiveView({
+  selectedMember,
+  selectedNotes,
+  selectedLabs,
+  selectedMeds,
+  selectedGaps,
+  selectedAuths,
+  selectedClaims,
+  selectedPharmacyClaims,
+  activeDeepDiveSection,
+  sectionQuestions,
+  deepDiveResponses,
+  supervisorNotes,
+  onSetActiveSection,
+  onUpdateQuestion,
+  onFlagForSupervisor,
+  onCompleteCall,
+  getSectionProgress,
+}: DeepDiveViewProps) {
+  function renderQuestionCard(sectionId: DeepDiveSectionId, question: SuggestedQuestion) {
+    const response = deepDiveResponses[sectionId]?.[question.id] ?? { notes: '', status: '' }
+
+    return (
+      <article key={question.id} className={`rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]}`}>
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
+            <label className="mt-3 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Coordinator Notes
+              <textarea
+                value={response.notes}
+                onChange={(event) => onUpdateQuestion(sectionId, question.id, { notes: event.target.value })}
+                rows={4}
+                placeholder="Capture what the patient said, barriers, and next steps"
+                className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-clinical-header"
+              />
+            </label>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(['Patient Answered', 'Skipped', 'Needs Follow-Up'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => onUpdateQuestion(sectionId, question.id, { status })}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    response.status === status ? deepDiveStatusStyles[status] : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  function renderLeftPanel(sectionId: DeepDiveSectionId) {
+    switch (sectionId) {
+      case 'clinical':
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Clinical Notes & History</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {selectedNotes.length} note{selectedNotes.length === 1 ? '' : 's'} on file. The most recent note is expanded by default.
+              </p>
+            </div>
+
+            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
+              {selectedNotes.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">
+                  No clinical notes on file for this patient.
+                </div>
+              ) : (
+                selectedNotes.map((note, index) => (
+                  <details key={note.note_id} open={index === 0} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span>{formatDate(note.note_date)} - {note.note_type}</span>
+                        <span className="text-xs font-normal text-slate-500">{note.provider_name} | {note.facility_name}</span>
+                      </div>
+                    </summary>
+                    <div className="mt-3 space-y-3 text-sm text-slate-700">
+                      <div className="grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-xs">
+                        <div><span className="font-semibold text-slate-500">Primary Dx:</span> {note.primary_diagnosis}</div>
+                        <div><span className="font-semibold text-slate-500">Follow-up:</span> {formatDate(note.follow_up_date)}</div>
+                        <div><span className="font-semibold text-slate-500">ICD:</span> {note.icd_code}</div>
+                        <div><span className="font-semibold text-slate-500">Provider:</span> {note.provider_name}</div>
+                      </div>
+                      {([
+                        ['Subjective', note.subjective],
+                        ['Objective', note.objective],
+                        ['Assessment', note.assessment],
+                        ['Plan', note.plan],
+                      ] as const).map(([label, value], idx) => (
+                        <details key={label} open={index === 0 && idx === 0} className="rounded-md border border-slate-200 bg-white p-2">
+                          <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</summary>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{value}</p>
+                        </details>
+                      ))}
+                    </div>
+                  </details>
+                ))
+              )}
+            </div>
+          </div>
+        )
+
+      case 'labs': {
+        const groupedLabs = selectedLabs.reduce<Record<string, typeof selectedLabs>>((acc, lab) => {
+          const list = acc[lab.lab_type] ?? []
+          list.push(lab)
+          acc[lab.lab_type] = list
+          return acc
+        }, {})
+        const groupNames = Object.keys(groupedLabs)
+        const abnormalCount = selectedLabs.filter((lab) => lab.result_flag !== 'Normal').length
+
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Lab Results</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {selectedLabs.length} lab result{selectedLabs.length === 1 ? '' : 's'} across {groupNames.length} lab type{groupNames.length === 1 ? '' : 's'}. {abnormalCount} are abnormal.
+              </p>
+            </div>
+            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
+              {selectedLabs.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No lab results on file for this patient.</div>
+              ) : (
+                groupNames.map((labType, index) => (
+                  <details key={labType} open={index === 0} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">{labType}</summary>
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="text-xs text-slate-500">
+                            <th className="py-1 font-medium">Draw Date</th>
+                            <th className="py-1 font-medium">Lab Type</th>
+                            <th className="py-1 font-medium">Test Name</th>
+                            <th className="py-1 font-medium">Result</th>
+                            <th className="py-1 font-medium">Unit</th>
+                            <th className="py-1 font-medium">Reference</th>
+                            <th className="py-1 font-medium">Flag</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupedLabs[labType].map((lab, idx) => (
+                            <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
+                              <td className="px-1 py-1.5">{formatDate(lab.draw_date)}</td>
+                              <td className="px-1 py-1.5">{lab.lab_type}</td>
+                              <td className="px-1 py-1.5">{lab.test_name}</td>
+                              <td className="px-1 py-1.5">{lab.result_value}</td>
+                              <td className="px-1 py-1.5">{lab.unit}</td>
+                              <td className="px-1 py-1.5">{lab.reference_range}</td>
+                              <td className={`px-1 py-1.5 font-semibold ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                ))
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      case 'medications': {
+        const activeMedications = selectedMeds.filter((medication) => medication.medication_status === 'Active')
+        const nonAdherentCount = selectedMeds.filter((medication) => medication.adherence_status === 'Non-Adherent').length
+        const onHoldCount = selectedMeds.filter((medication) => medication.adherence_status === 'On Hold').length
+
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Medications</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {activeMedications.length} active medication{activeMedications.length === 1 ? '' : 's'}. {nonAdherentCount} are Non-Adherent and {onHoldCount} are On Hold.
+              </p>
+            </div>
+            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-xs text-slate-500">
+                      <th className="py-1 font-medium">Drug Name</th>
+                      <th className="py-1 font-medium">Brand</th>
+                      <th className="py-1 font-medium">Dosage</th>
+                      <th className="py-1 font-medium">Frequency</th>
+                      <th className="py-1 font-medium">Indication</th>
+                      <th className="py-1 font-medium">Last Fill</th>
+                      <th className="py-1 font-medium">Days Since Fill</th>
+                      <th className="py-1 font-medium">Adherence</th>
+                      <th className="py-1 font-medium">Rx Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedMeds.map((medication, index) => (
+                      <tr key={medication.med_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${medication.adherence_status === 'Non-Adherent' ? 'bg-red-50' : ''}`}>
+                        <td className="px-1 py-1.5">{medication.drug_name}</td>
+                        <td className="px-1 py-1.5">{medication.brand_name}</td>
+                        <td className="px-1 py-1.5">{medication.dosage}</td>
+                        <td className="px-1 py-1.5">{medication.frequency}</td>
+                        <td className="px-1 py-1.5">{medication.indication}</td>
+                        <td className="px-1 py-1.5">{formatDate(medication.last_fill_date)}</td>
+                        <td className="px-1 py-1.5">{medication.days_since_last_fill}</td>
+                        <td className={`px-1 py-1.5 font-semibold ${adherenceStyles[medication.adherence_status] ?? 'text-slate-700'}`}>{medication.adherence_status}</td>
+                        <td className="px-1 py-1.5">{medication.rx_notes || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <details open className="rounded-lg border border-slate-200 bg-white p-3">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">Pharmacy Claims</summary>
+                <div className="mt-3 overflow-x-auto">
+                  {selectedPharmacyClaims.length === 0 ? (
+                    <p className="text-sm text-slate-500">No pharmacy claims on file for this patient.</p>
+                  ) : (
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-500">
+                          <th className="py-1 font-medium">Date Filled</th>
+                          <th className="py-1 font-medium">Drug</th>
+                          <th className="py-1 font-medium">Dosage</th>
+                          <th className="py-1 font-medium">Days Supply</th>
+                          <th className="py-1 font-medium">Prescriber</th>
+                          <th className="py-1 font-medium">Pharmacy</th>
+                          <th className="py-1 font-medium">Copay</th>
+                          <th className="py-1 font-medium">Plan Paid</th>
+                          <th className="py-1 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedPharmacyClaims.map((claim, index) => (
+                          <tr key={claim.rx_claim_id} className={index % 2 === 1 ? 'bg-clinical-row' : ''}>
+                            <td className="px-1 py-1.5">{formatDate(claim.date_filled)}</td>
+                            <td className="px-1 py-1.5">{claim.drug_name}</td>
+                            <td className="px-1 py-1.5">{claim.dosage}</td>
+                            <td className="px-1 py-1.5">{claim.days_supply}</td>
+                            <td className="px-1 py-1.5">{claim.prescribing_provider}</td>
+                            <td className="px-1 py-1.5">{claim.pharmacy_name}</td>
+                            <td className="px-1 py-1.5">{formatMoney(claim.copay_amount)}</td>
+                            <td className="px-1 py-1.5">{formatMoney(claim.plan_paid_amount)}</td>
+                            <td className="px-1 py-1.5">{claim.fill_status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </details>
+            </div>
+          </div>
+        )
+      }
+
+      case 'gaps':
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Care Gaps</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {selectedGaps.length} care gap{selectedGaps.length === 1 ? '' : 's'} on file. Open critical gaps are highlighted first.
+              </p>
+            </div>
+
+            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
+              {selectedGaps.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No care gaps on file for this patient.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-xs text-slate-500">
+                        <th className="py-1 font-medium">Category</th>
+                        <th className="py-1 font-medium">Gap Description</th>
+                        <th className="py-1 font-medium">Priority</th>
+                        <th className="py-1 font-medium">Days Overdue</th>
+                        <th className="py-1 font-medium">Last Completed</th>
+                        <th className="py-1 font-medium">Status</th>
+                        <th className="py-1 font-medium">Recommended Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedGaps.map((gap, index) => (
+                        <tr key={gap.gap_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${gap.priority === 'Critical' ? 'bg-red-50' : gap.priority === 'High' ? 'bg-amber-50' : ''}`}>
+                          <td className="px-1 py-1.5">{gap.gap_category}</td>
+                          <td className="px-1 py-1.5">{gap.gap_description}</td>
+                          <td className="px-1 py-1.5"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>{gap.priority}</span></td>
+                          <td className="px-1 py-1.5">{gap.days_overdue}</td>
+                          <td className="px-1 py-1.5">{formatDate(gap.last_completed_date)}</td>
+                          <td className="px-1 py-1.5">{gap.gap_status}</td>
+                          <td className="px-1 py-1.5">{gap.recommended_action}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+
+      case 'auths':
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Prior Authorizations</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {selectedAuths.length} prior authorization{selectedAuths.length === 1 ? '' : 's'} on file.
+              </p>
+            </div>
+            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
+              {selectedAuths.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No prior authorizations on file for this patient.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-xs text-slate-500">
+                        <th className="py-1 font-medium">Auth Type</th>
+                        <th className="py-1 font-medium">Service Requested</th>
+                        <th className="py-1 font-medium">Decision</th>
+                        <th className="py-1 font-medium">Decision Date</th>
+                        <th className="py-1 font-medium">Valid Through</th>
+                        <th className="py-1 font-medium">Denial Reason</th>
+                        <th className="py-1 font-medium">Appeal Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedAuths.map((auth, index) => (
+                        <tr key={auth.auth_id} className={index % 2 === 1 ? 'bg-clinical-row' : ''}>
+                          <td className="px-1 py-1.5">{auth.auth_type}</td>
+                          <td className="px-1 py-1.5">{auth.service_requested}</td>
+                          <td className={`px-1 py-1.5 font-semibold ${auth.decision === 'Denied' ? 'text-red-700' : auth.decision === 'Pending' ? 'text-amber-700' : auth.decision === 'Appealed' ? 'text-purple-700' : 'text-emerald-700'}`}>{auth.decision}</td>
+                          <td className="px-1 py-1.5">{auth.decision_date ? formatDate(auth.decision_date) : '-'}</td>
+                          <td className="px-1 py-1.5">{auth.valid_through ? formatDate(auth.valid_through) : '-'}</td>
+                          <td className="px-1 py-1.5">{auth.denial_reason || '-'}</td>
+                          <td className="px-1 py-1.5">{auth.appeal_status || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+
+      case 'claims': {
+        const erVisits = selectedClaims.filter((claim) => claim.place_of_service === 'Emergency Room').length
+        const inpatientStays = selectedClaims.filter((claim) => claim.place_of_service === 'Inpatient Hospital').length
+        const totalBilled = selectedClaims.reduce((sum, claim) => sum + claim.billed_amount, 0)
+
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Claims & Utilization</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {selectedMember?.patient_name ?? 'This patient'} has {selectedClaims.length} insurance claim{selectedClaims.length === 1 ? '' : 's'} on file.
+              </p>
+            </div>
+
+            <div className="mb-3 grid grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Total Claims</p><p className="mt-1 text-xl font-semibold text-slate-900">{selectedClaims.length}</p></div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">ER Visits</p><p className="mt-1 text-xl font-semibold text-red-700">{erVisits}</p></div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Inpatient Stays</p><p className="mt-1 text-xl font-semibold text-amber-700">{inpatientStays}</p></div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Total Billed</p><p className="mt-1 text-xl font-semibold text-slate-900">{formatMoney(totalBilled)}</p></div>
+            </div>
+
+            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
+              {selectedClaims.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No claims on file for this patient.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-xs text-slate-500">
+                        <th className="py-1 font-medium">Date</th>
+                        <th className="py-1 font-medium">Claim Type</th>
+                        <th className="py-1 font-medium">Place of Service</th>
+                        <th className="py-1 font-medium">Provider</th>
+                        <th className="py-1 font-medium">Facility</th>
+                        <th className="py-1 font-medium">Diagnosis</th>
+                        <th className="py-1 font-medium">Billed Amount</th>
+                        <th className="py-1 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedClaims.map((claim, index) => (
+                        <tr key={claim.claim_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${claim.place_of_service === 'Emergency Room' ? 'bg-red-50' : claim.place_of_service === 'Inpatient Hospital' ? 'bg-amber-50' : ''}`}>
+                          <td className="px-1 py-1.5">{formatDate(claim.date_of_service)}</td>
+                          <td className="px-1 py-1.5">{claim.claim_type}</td>
+                          <td className="px-1 py-1.5">{claim.place_of_service}</td>
+                          <td className="px-1 py-1.5">{claim.provider_name}</td>
+                          <td className="px-1 py-1.5">{claim.facility_name}</td>
+                          <td className="px-1 py-1.5">{claim.diagnosis_description}</td>
+                          <td className="px-1 py-1.5">{formatMoney(claim.billed_amount)}</td>
+                          <td className="px-1 py-1.5">{claim.claim_status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      }
+    }
+  }
+
+  function renderRightPanel(sectionId: DeepDiveSectionId) {
+    const questions = sectionQuestions[sectionId]
+    const progress = getSectionProgress(sectionId)
+
+    return (
+      <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Questions & Answers</h3>
+            <p className="text-sm text-slate-500">{formatSectionQuestionCount(progress.completed, progress.total)}</p>
+          </div>
+          {progress.allComplete ? <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">All answered</span> : null}
+        </div>
+
+        <div className="max-h-[640px] flex-1 space-y-2 overflow-auto pr-1">
+          {questions.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">No questions available for this section.</div>
+          ) : (
+            questions.map((question) => renderQuestionCard(sectionId, question))
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-xl bg-slate-900 px-5 py-4 text-white">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">Current Patient</p>
+          <h2 className="mt-1 text-lg font-semibold">
+            {selectedMember?.patient_name ?? 'No patient selected'} <span className="text-sm font-normal text-slate-300">{selectedMember?.member_id ?? ''}</span>
+          </h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onFlagForSupervisor} className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/20">Flag for Supervisor</button>
+          <button onClick={onCompleteCall} className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400">Complete Call</button>
+        </div>
+      </div>
+
+      {supervisorNotes.length > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Supervisor Notes</p>
+          <ul className="mt-2 space-y-1">
+            {supervisorNotes.map((note) => <li key={note}>{note}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-4">
+        <aside className="sticky top-4 h-fit rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="mb-3 border-b border-slate-200 pb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Section Navigator</h3>
+            <p className="mt-1 text-sm text-slate-600">Jump freely between sections.</p>
+          </div>
+          <div className="space-y-2">
+            {deepDiveSections.map((section) => {
+              const progress = getSectionProgress(section.id)
+              const isActive = activeDeepDiveSection === section.id
+              return (
+                <button key={section.id} onClick={() => onSetActiveSection(section.id)} className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${isActive ? 'border-clinical-header bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${progress.allComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{progress.allComplete ? '✓' : section.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{section.label}</span>
+                    <span className="block text-xs text-slate-500">{formatSectionQuestionCount(progress.completed, progress.total)}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <div className="grid min-h-[680px] grid-cols-[55%_45%] gap-4">
+          {renderLeftPanel(activeDeepDiveSection)}
+          {renderRightPanel(activeDeepDiveSection)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface SummaryViewProps {
+  draft: CarePlanDraft
+  onUpdateDraft: (field: keyof CarePlanDraft, value: string | string[]) => void
+  onUpdateDraftListItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions', index: number, value: string) => void
+  onAddDraftItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions') => void
+  onRemoveDraftItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions', index: number) => void
+  onSaveDraft: () => void
+  onExportAsPdf: () => void
+  onStartNewCall: () => void
+  toastVisible: boolean
+  sectionQuestions: Record<DeepDiveSectionId, SuggestedQuestion[]>
+  deepDiveResponses: Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>
+}
+
+export function SummaryView({
+  draft,
+  onUpdateDraft,
+  onUpdateDraftListItem,
+  onAddDraftItem,
+  onRemoveDraftItem,
+  onSaveDraft,
+  onExportAsPdf,
+  onStartNewCall,
+  toastVisible,
+  sectionQuestions,
+  deepDiveResponses,
+}: SummaryViewProps) {
+  function renderQuestionSummarySection(sectionId: DeepDiveSectionId, title: string) {
+    const questions = sectionQuestions[sectionId]
+    const responses = deepDiveResponses[sectionId] ?? {}
+
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            <p className="text-xs text-slate-500">{formatSectionQuestionCount(questions.filter((question) => statusIsComplete(responses[question.id]?.status ?? '')).length, questions.length)}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {questions.length === 0 ? (
+            <p className="text-sm text-slate-500">No questions available for this section.</p>
+          ) : (
+            questions.map((question) => {
+              const response = responses[question.id] ?? { notes: '', status: '' }
+              const isSkipped = response.status === 'Skipped'
+              const isFollowUp = response.status === 'Needs Follow-Up'
+
+              return (
+                <article key={question.id} className={`rounded-md border p-3 ${isSkipped ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{question.text}</p>
+                      <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">{question.category}</p>
+                    </div>
+                    {isFollowUp ? (
+                      <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Needs Follow-Up</span>
+                    ) : isSkipped ? (
+                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">Skipped</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 rounded-md bg-slate-50 p-2 text-sm text-slate-700">
+                    {isSkipped ? <p>Skipped</p> : response.notes.trim() ? <p className="whitespace-pre-wrap">{response.notes}</p> : <p className="italic text-slate-500">No coordinator notes captured.</p>}
+                  </div>
+                </article>
+              )
+            })
+          )}
+        </div>
+      </section>
+    )
+  }
+
+  function renderEditableListField(
+    label: string,
+    field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions',
+    items: string[],
+    placeholder: string,
+  ) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">{label}</h4>
+          <button onClick={() => onAddDraftItem(field)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">Add Item</button>
+        </div>
+
+        <div className="space-y-2">
+          {items.length === 0 ? (
+            <p className="text-sm text-slate-500">No items added yet.</p>
+          ) : (
+            items.map((item, index) => (
+              <div key={`${field}-${index}`} className="flex items-start gap-2">
+                <textarea
+                  value={item}
+                  onChange={(event) => onUpdateDraftListItem(field, index, event.target.value)}
+                  rows={2}
+                  placeholder={placeholder}
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
+                />
+                <button onClick={() => onRemoveDraftItem(field, index)} className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100">Remove</button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <div className="summary-print-root grid min-h-[720px] grid-cols-[44%_56%] gap-5">
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Answers Collected</h2>
+          <p className="mt-1 text-sm text-slate-600">Read-only call summary organized by section.</p>
+        </div>
+
+        <div className="max-h-[780px] flex-1 space-y-3 overflow-auto pr-1">
+          {deepDiveSections.map((section) => renderQuestionSummarySection(section.id, section.label))}
+        </div>
+      </div>
+
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 rounded-lg bg-slate-50 p-4">
+          <h2 className="text-xl font-semibold text-slate-900">Care Plan Draft Preview</h2>
+          <p className="mt-1 text-sm text-slate-600">All sections are editable inline.</p>
+        </div>
+
+        <div className="max-h-[780px] flex-1 space-y-4 overflow-auto pr-1">
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="grid grid-cols-3 gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Patient Name</span>
+                <input value={draft.patientName} onChange={(event) => onUpdateDraft('patientName', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Member ID</span>
+                <input value={draft.memberId} onChange={(event) => onUpdateDraft('memberId', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Date</span>
+                <input value={draft.date} onChange={(event) => onUpdateDraft('date', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
+              </label>
+            </div>
+          </section>
+
+          {renderEditableListField('Active Diagnoses', 'activeDiagnoses', draft.activeDiagnoses, 'Type or edit diagnosis')}
+          {renderEditableListField('Current Medications', 'currentMedications', draft.currentMedications, 'Type or edit medication line')}
+          {renderEditableListField('Open Care Gaps', 'openCareGaps', draft.openCareGaps, 'Type or edit care gap')}
+          {renderEditableListField('Recommended Interventions', 'recommendedInterventions', draft.recommendedInterventions, 'Type or edit intervention')}
+          {renderEditableListField('Follow-Up Actions', 'followUpActions', draft.followUpActions, 'Type or edit follow-up action')}
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Coordinator Notes</h4>
+            <textarea
+              value={draft.coordinatorNotes}
+              onChange={(event) => onUpdateDraft('coordinatorNotes', event.target.value)}
+              rows={5}
+              placeholder="Add free-text notes for the care plan"
+              className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
+            />
+          </section>
+        </div>
+      </div>
+
+      <div className="no-print fixed bottom-6 right-6 flex items-center gap-2">
+        {toastVisible ? (
+          <div className="rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">Draft saved successfully</div>
+        ) : null}
+      </div>
+
+      <div className="no-print fixed inset-x-0 bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+        <button onClick={onSaveDraft} className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110">Save Draft</button>
+        <button onClick={onExportAsPdf} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Export as PDF</button>
+        <button onClick={onStartNewCall} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Start New Call</button>
+      </div>
+    </div>
+  )
+}

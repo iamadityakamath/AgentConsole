@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 1280px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Keep read-only UI on default cursor across all views. */
+* {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button,
+a,
+select,
+[role='button'],
+[draggable='true'] {
+  cursor: pointer;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.fade-in {
+  animation: fadeIn 150ms ease-out;
+}
+
+@media print {
+  body {
+    min-width: 0;
+    background: white;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .summary-print-root {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .summary-print-root,
+  .summary-print-root * {
+    visibility: visible;
+  }
+
+  .summary-print-root {
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
