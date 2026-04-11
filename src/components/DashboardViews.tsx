@@ -216,6 +216,8 @@ interface OverviewViewProps {
   careGapsError: string
   labResultsLoading: boolean
   labResultsError: string
+  medicationsLoading: boolean
+  medicationsError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
@@ -251,6 +253,8 @@ export function OverviewView({
   careGapsError,
   labResultsLoading,
   labResultsError,
+  medicationsLoading,
+  medicationsError,
   selectedNotes,
   selectedLabs,
   selectedMeds,
@@ -337,7 +341,7 @@ export function OverviewView({
     : []
 
   return (
-    <div className="grid h-full grid-cols-12 gap-5">
+    <div className="grid h-full min-h-0 grid-cols-12 gap-5">
       {!selectedMember || !selectedTicket ? (
         <div className="col-span-12 flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
           <div>
@@ -347,7 +351,7 @@ export function OverviewView({
         </div>
       ) : (
         <>
-          <div className="col-span-5 grid grid-cols-[240px_1fr] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="col-span-5 grid min-h-0 grid-cols-[240px_1fr] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <aside className="rounded-lg border border-slate-200 bg-white p-2">
               <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Sections</p>
               <div className="mt-1 space-y-1">
@@ -363,7 +367,7 @@ export function OverviewView({
               </div>
             </aside>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
               {activePanel === 'demographics' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Patient Demographics</h3>
@@ -425,7 +429,7 @@ export function OverviewView({
                   {!careGapsLoading && !careGapsError && selectedGaps.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
                   ) : (
-                    <div className="mt-2 space-y-3 text-sm">
+                    <div className="mt-2 space-y-3 pr-1 text-sm">
                       {selectedGaps.map((gap) => {
                         const fields: Array<{ label: string; value: string }> = [
                           { label: 'gap_id', value: gap.gap_id },
@@ -446,22 +450,33 @@ export function OverviewView({
                         ]
 
                         return (
-                          <div key={gap.gap_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                            <div className="mb-2 flex items-center justify-between">
-                              <p className="font-semibold text-slate-800">{truncateText(gap.gap_description, 70)}</p>
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
-                                {gap.priority}
-                              </span>
+                          <details key={gap.gap_id} className="group rounded-lg border border-slate-200 bg-white">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(gap.gap_description, 72)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {gap.gap_category} • {gap.gap_status} • {gap.days_overdue} days overdue
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
+                                  {gap.priority}
+                                </span>
+                                <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              </div>
+                            </summary>
+
+                            <div className="border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                                {fields.map((field) => (
+                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                            <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                              {fields.map((field) => (
-                                <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                  <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                  <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                          </details>
                         )
                       })}
                     </div>
@@ -481,7 +496,7 @@ export function OverviewView({
                   {!labResultsLoading && !labResultsError && selectedLabs.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
                   ) : (
-                    <div className="mt-2 space-y-3 text-sm">
+                    <div className="mt-2 space-y-3 pr-1 text-sm">
                       {selectedLabs.map((lab) => {
                         const fields: Array<{ label: string; value: string }> = [
                           { label: 'lab_id', value: lab.lab_id },
@@ -540,17 +555,69 @@ export function OverviewView({
               {activePanel === 'medications' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Medication List</h3>
-                  {selectedMeds.length === 0 ? (
+                  {medicationsLoading ? (
+                    <p className="mt-2 text-sm text-slate-600">Loading medications...</p>
+                  ) : null}
+                  {!medicationsLoading && medicationsError ? (
+                    <p className="mt-2 text-sm text-red-700">{medicationsError}</p>
+                  ) : null}
+                  {!medicationsLoading && !medicationsError && selectedMeds.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No medications on file for this patient.</p>
                   ) : (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {selectedMeds.map((med) => (
-                        <li key={med.med_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                          <p className="font-medium text-slate-800">{med.drug_name} {med.dosage} - {med.frequency}</p>
-                          <p className={`text-xs ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>{med.adherence_status}</p>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-2 space-y-3 pr-1 text-sm">
+                      {selectedMeds.map((med) => {
+                        const fields: Array<{ label: string; value: string }> = [
+                          { label: 'med_id', value: med.med_id },
+                          { label: 'member_id', value: med.member_id },
+                          { label: 'patient_name', value: med.patient_name ?? 'N/A' },
+                          { label: 'gender', value: med.gender ?? 'N/A' },
+                          { label: 'age', value: med.age == null ? 'N/A' : String(med.age) },
+                          { label: 'drug_name', value: med.drug_name },
+                          { label: 'brand_name', value: med.brand_name },
+                          { label: 'dosage', value: med.dosage },
+                          { label: 'route', value: med.route },
+                          { label: 'frequency', value: med.frequency },
+                          { label: 'indication', value: med.indication },
+                          { label: 'prescribing_provider', value: med.prescribing_provider },
+                          { label: 'date_prescribed', value: med.date_prescribed || 'N/A' },
+                          { label: 'last_fill_date', value: med.last_fill_date || 'N/A' },
+                          { label: 'days_since_last_fill', value: String(med.days_since_last_fill) },
+                          { label: 'adherence_status', value: med.adherence_status },
+                          { label: 'medication_status', value: med.medication_status },
+                          { label: 'rx_notes', value: med.rx_notes || 'N/A' },
+                        ]
+
+                        return (
+                          <details key={med.med_id} className="group rounded-lg border border-slate-200 bg-white">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(`${med.drug_name} ${med.dosage}`, 72)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {med.frequency} • Last fill {formatDate(med.last_fill_date)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>
+                                  {med.adherence_status}
+                                </span>
+                                <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              </div>
+                            </summary>
+
+                            <div className="border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                                {fields.map((field) => (
+                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </div>
                   )}
                 </>
               ) : null}
@@ -593,7 +660,7 @@ export function OverviewView({
             </div>
           </div>
 
-          <div className="col-span-7 flex flex-col rounded-xl border border-slate-200 bg-white p-4">
+          <div className="col-span-7 flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
               <p className="text-sm text-slate-500">
@@ -638,7 +705,7 @@ export function OverviewView({
               </div>
             </div>
 
-            <div className="max-h-[calc(100vh-300px)] flex-1 space-y-2 overflow-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {visibleQuestions.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
                   All questions are currently skipped. Return to Ticket Queue and choose another member or continue to Begin Call.

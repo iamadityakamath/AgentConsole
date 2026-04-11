@@ -14,6 +14,8 @@ interface OverviewPageProps {
   careGapsError: string
   labResultsLoading: boolean
   labResultsError: string
+  medicationsLoading: boolean
+  medicationsError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]

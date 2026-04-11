@@ -1,4 +1,4 @@
-import type { CareGap, DashboardData, LabResult } from '../types/domain'
+import type { CareGap, DashboardData, LabResult, Medication } from '../types/domain'
 
 interface PatientApiRecord {
   member_id: string
@@ -75,6 +75,27 @@ interface LabResultApiRecord {
   lab_facility: string
   status: string
   clinical_note: string
+}
+
+interface MedicationApiRecord {
+  med_id: string
+  member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
+  drug_name: string
+  brand_name: string
+  dosage: string
+  route: string
+  frequency: string
+  indication: string
+  prescribing_provider: string
+  date_prescribed: string
+  last_fill_date: string
+  days_since_last_fill: number
+  adherence_status: string
+  medication_status: string
+  rx_notes: string
 }
 
 const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? 'http://localhost:8000/api/v1/patients'
@@ -166,6 +187,11 @@ function normalizeGapStatus(value: string): CareGap['gap_status'] {
 function normalizeLabResultFlag(value: string): LabResult['result_flag'] {
   if (value === 'Normal' || value === 'High' || value === 'Low' || value === 'Critical High' || value === 'Critical Low') return value
   return 'Normal'
+}
+
+function normalizeMedicationAdherence(value: string): Medication['adherence_status'] {
+  if (value === 'Adherent' || value === 'Partially Adherent' || value === 'Non-Adherent' || value === 'On Hold' || value === 'Discontinued') return value
+  return 'Adherent'
 }
 
 export async function loadCareGaps(memberId: string): Promise<CareGap[]> {
@@ -260,5 +286,55 @@ export async function loadLabResults(memberId: string): Promise<LabResult[]> {
       lab_facility: row.lab_facility,
       status: row.status,
       clinical_note: row.clinical_note,
+    }))
+}
+
+export async function loadMedications(memberId: string): Promise<Medication[]> {
+  const urls = [
+    `http://localhost:8000/api/v1/medications/${encodeURIComponent(memberId)}`,
+    `http://localhost:8000/api/v1/medications?member_id=${encodeURIComponent(memberId)}`,
+  ]
+
+  let payload: unknown = null
+  let lastStatus = 0
+
+  for (const url of urls) {
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      lastStatus = response.status
+      continue
+    }
+
+    payload = await response.json()
+    break
+  }
+
+  if (payload == null) {
+    throw new Error(`Medications API failed with status ${lastStatus || 'unknown'}`)
+  }
+
+  const rows = Array.isArray(payload) ? payload : [payload]
+
+  return rows
+    .filter((row): row is MedicationApiRecord => !!row && typeof row === 'object')
+    .map((row) => ({
+      med_id: row.med_id,
+      member_id: row.member_id,
+      patient_name: row.patient_name,
+      gender: row.gender,
+      age: row.age,
+      drug_name: row.drug_name,
+      brand_name: row.brand_name,
+      dosage: row.dosage,
+      route: row.route,
+      frequency: row.frequency,
+      indication: row.indication,
+      prescribing_provider: row.prescribing_provider,
+      date_prescribed: row.date_prescribed,
+      last_fill_date: row.last_fill_date,
+      days_since_last_fill: Number(row.days_since_last_fill ?? 0),
+      adherence_status: normalizeMedicationAdherence(row.adherence_status),
+      medication_status: row.medication_status,
+      rx_notes: row.rx_notes,
     }))
 }

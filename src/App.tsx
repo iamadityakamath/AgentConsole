@@ -4,7 +4,7 @@ import { QueuePage } from './pages/QueuePage'
 import { OverviewPage } from './pages/OverviewPage'
 import { DeepDivePage } from './pages/DeepDivePage'
 import { SummaryPage } from './pages/SummaryPage'
-import { loadCareGaps, loadDashboardData, loadLabResults, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
+import { loadCareGaps, loadDashboardData, loadLabResults, loadMedications, loadPatientDetail, type PatientDetailApiRecord } from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from './types/questions'
@@ -68,6 +68,9 @@ function App() {
   const [labResultsByMember, setLabResultsByMember] = useState<Record<string, DashboardData['labResults']>>({})
   const [labResultsLoadingByMember, setLabResultsLoadingByMember] = useState<Record<string, boolean>>({})
   const [labResultsErrorByMember, setLabResultsErrorByMember] = useState<Record<string, string>>({})
+  const [medicationsByMember, setMedicationsByMember] = useState<Record<string, DashboardData['medications']>>({})
+  const [medicationsLoadingByMember, setMedicationsLoadingByMember] = useState<Record<string, boolean>>({})
+  const [medicationsErrorByMember, setMedicationsErrorByMember] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void (async () => {
@@ -161,6 +164,31 @@ function App() {
   }, [currentView, selectedMemberId, labResultsByMember])
 
   useEffect(() => {
+    if (currentView !== 'overview' || !selectedMemberId || medicationsByMember[selectedMemberId]) return
+
+    setMedicationsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
+    setMedicationsErrorByMember((prev) => {
+      const next = { ...prev }
+      delete next[selectedMemberId]
+      return next
+    })
+
+    void (async () => {
+      try {
+        const rows = await loadMedications(selectedMemberId)
+        setMedicationsByMember((prev) => ({ ...prev, [selectedMemberId]: rows }))
+      } catch (error) {
+        setMedicationsErrorByMember((prev) => ({
+          ...prev,
+          [selectedMemberId]: error instanceof Error ? error.message : 'Failed to load medications',
+        }))
+      } finally {
+        setMedicationsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
+      }
+    })()
+  }, [currentView, selectedMemberId, medicationsByMember])
+
+  useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
 
     setCarePlanDraftByMember((prev) => {
@@ -202,7 +230,10 @@ function App() {
     [labResults, labResultsByMember, selectedMemberId],
   )
 
-  const selectedMeds = useMemo(() => medications.filter((medication) => medication.member_id === selectedMemberId), [medications, selectedMemberId])
+  const selectedMeds = useMemo(() => {
+    if (!selectedMemberId) return []
+    return medicationsByMember[selectedMemberId] ?? medications.filter((medication) => medication.member_id === selectedMemberId)
+  }, [medications, medicationsByMember, selectedMemberId])
   const selectedGaps = useMemo(() => {
     if (!selectedMemberId) return []
     const apiGaps = careGapsByMember[selectedMemberId]
@@ -286,6 +317,8 @@ function App() {
   const selectedCareGapsError = selectedMemberId ? (careGapsErrorByMember[selectedMemberId] ?? '') : ''
   const selectedLabResultsLoading = selectedMemberId ? (labResultsLoadingByMember[selectedMemberId] ?? false) : false
   const selectedLabResultsError = selectedMemberId ? (labResultsErrorByMember[selectedMemberId] ?? '') : ''
+  const selectedMedicationsLoading = selectedMemberId ? (medicationsLoadingByMember[selectedMemberId] ?? false) : false
+  const selectedMedicationsError = selectedMemberId ? (medicationsErrorByMember[selectedMemberId] ?? '') : ''
 
   function buildCarePlanDraft(memberId: string): CarePlanDraft {
     const patient = members.find((member) => member.member_id === memberId)
@@ -564,8 +597,8 @@ function App() {
   const summaryDraft = currentCarePlanDraft ?? (selectedMemberId ? buildCarePlanDraft(selectedMemberId) : null)
 
   return (
-    <div className="min-h-screen bg-clinical-bg px-2 py-2 text-slate-900 md:px-4 md:py-4">
-      <div className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:rounded-2xl">
+    <div className="h-screen overflow-hidden bg-clinical-bg px-2 py-2 text-slate-900 md:px-4 md:py-4">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:rounded-2xl">
         <header className="no-print bg-clinical-header px-8 py-5 text-white">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -597,8 +630,8 @@ function App() {
           </div>
         </header>
 
-        <main className="min-h-[720px] bg-white p-6">
-          <section className="fade-in h-full">
+        <main className="flex-1 min-h-0 overflow-hidden bg-white p-6">
+          <section className="fade-in h-full overflow-hidden">
             <Routes>
               <Route path="/" element={<Navigate to="/queue" replace />} />
               <Route path="/queue" element={(
@@ -623,6 +656,8 @@ function App() {
                   careGapsError={selectedCareGapsError}
                 labResultsLoading={selectedLabResultsLoading}
                 labResultsError={selectedLabResultsError}
+                medicationsLoading={selectedMedicationsLoading}
+                medicationsError={selectedMedicationsError}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}
@@ -691,7 +726,7 @@ function App() {
         </main>
 
         {currentView !== 'summary' ? (
-          <footer className="no-print flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
+          <footer className="no-print shrink-0 flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
             <button
               onClick={() => navigateToView(viewOrder[Math.max(0, viewOrder.indexOf(currentView) - 1)])}
               disabled={viewOrder.indexOf(currentView) === 0}

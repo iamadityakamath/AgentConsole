@@ -87,6 +87,9 @@ export interface LabResult {
 export interface Medication {
   med_id: string
   member_id: string
+  patient_name?: string
+  gender?: string
+  age?: number
   drug_name: string
   brand_name: string
   dosage: string
