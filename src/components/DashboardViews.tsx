@@ -8,6 +8,7 @@ import type {
   PriorAuthorization,
   SeverityLevel,
 } from '../types/domain'
+import { useState } from 'react'
 import type { TicketRow } from '../types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
 import {
@@ -207,6 +208,7 @@ export function TicketQueueView({
 interface OverviewViewProps {
   selectedMember: MemberProfile | null
   selectedTicket: TicketRow | null
+  selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
   selectedGaps: CareGap[]
@@ -234,6 +236,7 @@ interface OverviewViewProps {
 export function OverviewView({
   selectedMember,
   selectedTicket,
+  selectedNotes,
   selectedLabs,
   selectedMeds,
   selectedGaps,
@@ -255,6 +258,17 @@ export function OverviewView({
   onDragEnd,
   onSkipQuestion,
 }: OverviewViewProps) {
+  const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
+
+  const panelItems: Array<{ id: 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'; label: string }> = [
+    { id: 'demographics', label: 'Patient Demographics' },
+    { id: 'gaps', label: 'Care Gap Reports' },
+    { id: 'labs', label: 'Lab Results' },
+    { id: 'medications', label: 'Medication List' },
+    { id: 'auths', label: 'Prior Auth History' },
+    { id: 'notes', label: 'EHR Clinical Notes' },
+  ]
+
   return (
     <div className="grid h-full grid-cols-5 gap-5">
       {!selectedMember || !selectedTicket ? (
@@ -266,106 +280,141 @@ export function OverviewView({
         </div>
       ) : (
         <>
-          <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="rounded-lg bg-white p-4 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-900">{selectedMember.patient_name}</h2>
-              <p className="text-sm text-slate-500">Member ID: {selectedMember.member_id}</p>
-              <p className="mt-1 text-sm text-slate-600">
-                {selectedMember.age} years, {selectedMember.gender}, {selectedMember.location}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[selectedTicket.severityLevel]}`}>
-                  {selectedTicket.severityLevel}
-                </span>
-                <span className="text-xs text-slate-500">Primary: {selectedTicket.primaryConditions.join(' | ')}</span>
+          <div className="col-span-2 grid grid-cols-[220px_1fr] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <aside className="rounded-lg border border-slate-200 bg-white p-2">
+              <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Sections</p>
+              <div className="mt-1 space-y-1">
+                {panelItems.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setActivePanel(item.id)}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${activePanel === item.id ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
-            </div>
+            </aside>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Open Care Gaps</p>
-                <p className={`mt-1 text-xl font-semibold ${selectedGaps.filter((g) => g.gap_status === 'Open').length > 3 ? 'text-red-700' : 'text-slate-800'}`}>
-                  {selectedGaps.filter((g) => g.gap_status === 'Open').length}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Non-Adherent Meds</p>
-                <p className={`mt-1 text-xl font-semibold ${selectedMeds.filter((m) => m.adherence_status === 'Non-Adherent').length > 0 ? 'text-red-700' : 'text-slate-800'}`}>
-                  {selectedMeds.filter((m) => m.adherence_status === 'Non-Adherent').length}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Critical Lab Flags</p>
-                <p className={`mt-1 text-xl font-semibold ${selectedLabs.filter((l) => l.result_flag === 'Critical High' || l.result_flag === 'Critical Low').length > 0 ? 'text-red-700' : 'text-slate-800'}`}>
-                  {selectedLabs.filter((l) => l.result_flag === 'Critical High' || l.result_flag === 'Critical Low').length}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Pending/Denied Auths</p>
-                <p className={`mt-1 text-xl font-semibold ${selectedAuths.filter((a) => a.decision === 'Pending' || a.decision === 'Denied').length > 0 ? 'text-amber-700' : 'text-slate-800'}`}>
-                  {selectedAuths.filter((a) => a.decision === 'Pending' || a.decision === 'Denied').length}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Most Recent Lab Results</h3>
-              {selectedLabs.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
-              ) : (
-                <table className="mt-2 w-full text-left text-sm">
-                  <thead>
-                    <tr className="text-xs text-slate-500">
-                      <th className="py-1 font-medium">Test Name</th>
-                      <th className="py-1 font-medium">Result</th>
-                      <th className="py-1 font-medium">Flag</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedLabs.slice(0, 5).map((lab, idx) => (
-                      <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
-                        <td className="px-1 py-1.5">{lab.test_name}</td>
-                        <td className="px-1 py-1.5">{lab.result_value} {lab.unit}</td>
-                        <td className={`px-1 py-1.5 ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Active Medications Summary</h3>
-              {selectedMeds.filter((m) => m.medication_status === 'Active').length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No active medications on file for this patient.</p>
-              ) : (
-                <ul className="mt-2 space-y-2 text-sm">
-                  {selectedMeds.filter((m) => m.medication_status === 'Active').map((med) => (
-                    <li key={med.med_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                      <p className="font-medium text-slate-800">{med.drug_name} {med.dosage} - {med.frequency}</p>
-                      <p className={`text-xs ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>{med.adherence_status}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Open Care Gaps Summary</h3>
-              {selectedGaps.filter((gap) => gap.gap_status === 'Open').length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
-              ) : (
-                <ul className="mt-2 space-y-2 text-sm">
-                  {selectedGaps.filter((gap) => gap.gap_status === 'Open').map((gap) => (
-                    <li key={gap.gap_id} className="flex items-center justify-between gap-3 rounded border border-slate-200 px-2 py-1.5">
-                      <span className="text-slate-700">{truncateText(gap.gap_description, 60)}</span>
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
-                        {gap.priority}
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              {activePanel === 'demographics' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Patient Demographics</h3>
+                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <h2 className="text-lg font-semibold text-slate-900">{selectedMember.patient_name}</h2>
+                    <p className="text-sm text-slate-500">Member ID: {selectedMember.member_id}</p>
+                    <p className="mt-1 text-sm text-slate-600">{selectedMember.age} years, {selectedMember.gender}, {selectedMember.location}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityPillStyles[selectedTicket.severityLevel]}`}>
+                        {selectedTicket.severityLevel}
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                      <span className="text-xs text-slate-500">Primary: {selectedTicket.primaryConditions.join(' | ')}</span>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {activePanel === 'gaps' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Care Gap Reports</h3>
+                  {selectedGaps.filter((gap) => gap.gap_status === 'Open').length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
+                  ) : (
+                    <ul className="mt-2 space-y-2 text-sm">
+                      {selectedGaps.filter((gap) => gap.gap_status === 'Open').map((gap) => (
+                        <li key={gap.gap_id} className="flex items-center justify-between gap-3 rounded border border-slate-200 px-2 py-1.5">
+                          <span className="text-slate-700">{truncateText(gap.gap_description, 60)}</span>
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>
+                            {gap.priority}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
+
+              {activePanel === 'labs' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Lab Results</h3>
+                  {selectedLabs.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
+                  ) : (
+                    <table className="mt-2 w-full text-left text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-500">
+                          <th className="py-1 font-medium">Test Name</th>
+                          <th className="py-1 font-medium">Result</th>
+                          <th className="py-1 font-medium">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedLabs.slice(0, 8).map((lab, idx) => (
+                          <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
+                            <td className="px-1 py-1.5">{lab.test_name}</td>
+                            <td className="px-1 py-1.5">{lab.result_value} {lab.unit}</td>
+                            <td className={`px-1 py-1.5 ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              ) : null}
+
+              {activePanel === 'medications' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Medication List</h3>
+                  {selectedMeds.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No medications on file for this patient.</p>
+                  ) : (
+                    <ul className="mt-2 space-y-2 text-sm">
+                      {selectedMeds.map((med) => (
+                        <li key={med.med_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                          <p className="font-medium text-slate-800">{med.drug_name} {med.dosage} - {med.frequency}</p>
+                          <p className={`text-xs ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>{med.adherence_status}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
+
+              {activePanel === 'auths' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Prior Auth History</h3>
+                  {selectedAuths.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No prior authorization history on file.</p>
+                  ) : (
+                    <ul className="mt-2 space-y-2 text-sm">
+                      {selectedAuths.map((auth) => (
+                        <li key={auth.auth_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                          <p className="font-medium text-slate-800">{auth.service_requested}</p>
+                          <p className="text-xs text-slate-600">{auth.auth_type} • {auth.decision}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
+
+              {activePanel === 'notes' ? (
+                <>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">EHR Clinical Notes</h3>
+                  {selectedNotes.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No EHR notes on file for this patient.</p>
+                  ) : (
+                    <ul className="mt-2 space-y-2 text-sm">
+                      {selectedNotes.slice(0, 8).map((note) => (
+                        <li key={note.note_id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                          <p className="font-medium text-slate-800">{note.primary_diagnosis}</p>
+                          <p className="text-xs text-slate-600">{note.note_type} • {formatDate(note.note_date)}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
             </div>
           </div>
 

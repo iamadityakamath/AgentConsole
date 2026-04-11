@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { DeepDiveView, OverviewView, SummaryView, TicketQueueView } from './components/DashboardViews'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { QueuePage } from './pages/QueuePage'
+import { OverviewPage } from './pages/OverviewPage'
+import { DeepDivePage } from './pages/DeepDivePage'
+import { SummaryPage } from './pages/SummaryPage'
 import { loadDashboardData } from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
@@ -26,11 +30,21 @@ const gapPriorityRank: Record<string, number> = {
 }
 
 function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  const routeMatch = useMemo(() => {
+    const match = location.pathname.match(/^\/(queue|overview|deep-dive|summary)(?:\/([^/]+))?$/)
+    if (!match) return null
+    return {
+      view: match[1] as AppView,
+      memberId: match[2] ? decodeURIComponent(match[2]) : null,
+    }
+  }, [location.pathname])
+
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [currentView, setCurrentView] = useState<AppView>('queue')
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<'All' | SeverityLevel>('All')
   const [searchTerm, setSearchTerm] = useState('')
   const [customQuestionsByMember, setCustomQuestionsByMember] = useState<Record<string, SuggestedQuestion[]>>({})
@@ -59,17 +73,8 @@ function App() {
     })()
   }, [])
 
-  if (loadError) {
-    return (
-      <div className="min-h-screen bg-clinical-bg px-6 py-8">
-        <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
-          <h2 className="text-xl font-semibold text-red-700">Unable to load patient data</h2>
-          <p className="mt-2 text-sm text-slate-700">{loadError}</p>
-          <p className="mt-1 text-sm text-slate-600">Expected endpoint: http://localhost:8000/api/v1/patients</p>
-        </div>
-      </div>
-    )
-  }
+  const currentView: AppView = routeMatch?.view ?? 'queue'
+  const selectedMemberId = routeMatch?.memberId ?? null
 
   useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
@@ -215,13 +220,12 @@ function App() {
   }
 
   function beginPrep(memberId: string) {
-    setSelectedMemberId(memberId)
-    setCurrentView('overview')
+    navigate(`/overview/${encodeURIComponent(memberId)}`)
   }
 
   function beginCall() {
     if (selectedMemberId) setActiveDeepDiveSection('clinical')
-    setCurrentView('deep-dive')
+    if (selectedMemberId) navigate(`/deep-dive/${encodeURIComponent(selectedMemberId)}`)
   }
 
   function flagForSupervisor() {
@@ -237,7 +241,7 @@ function App() {
   }
 
   function completeCall() {
-    setCurrentView('summary')
+    if (selectedMemberId) navigate(`/summary/${encodeURIComponent(selectedMemberId)}`)
   }
 
   function setQuestionState(questionId: string, patch: Partial<QuestionUIState>) {
@@ -430,11 +434,32 @@ function App() {
   }
 
   function startNewCall() {
-    setCurrentView('queue')
-    setSelectedMemberId(null)
+    navigate('/queue')
     setActiveDeepDiveSection('clinical')
     setNewQuestionText('')
     setDraftToastVisible(false)
+  }
+
+  function navigateToView(view: AppView) {
+    if (view === 'queue') {
+      navigate('/queue')
+      return
+    }
+
+    if (!selectedMemberId) return
+    navigate(`/${view}/${encodeURIComponent(selectedMemberId)}`)
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-clinical-bg px-6 py-8">
+        <div className="mx-auto w-full min-w-[1280px] max-w-[1400px] rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
+          <h2 className="text-xl font-semibold text-red-700">Unable to load patient data</h2>
+          <p className="mt-2 text-sm text-slate-700">{loadError}</p>
+          <p className="mt-1 text-sm text-slate-600">Expected endpoint: http://localhost:8000/api/v1/patients</p>
+        </div>
+      </div>
+    )
   }
 
   const summaryDraft = currentCarePlanDraft ?? (selectedMemberId ? buildCarePlanDraft(selectedMemberId) : null)
@@ -458,11 +483,13 @@ function App() {
             {viewOrder.map((view, idx) => {
               const complete = idx < viewOrder.indexOf(currentView)
               const active = view === currentView
+              const disabled = view !== 'queue' && !selectedMemberId
               return (
                 <button
                   key={view}
-                  onClick={() => setCurrentView(view)}
-                  className={`rounded-md border px-3 py-2 text-left text-sm transition ${active ? 'border-white bg-white/20' : complete ? 'border-blue-200/70 bg-blue-300/20' : 'border-blue-300/40 bg-blue-300/10'}`}
+                  onClick={() => navigateToView(view)}
+                  disabled={disabled}
+                  className={`rounded-md border px-3 py-2 text-left text-sm transition ${active ? 'border-white bg-white/20' : complete ? 'border-blue-200/70 bg-blue-300/20' : 'border-blue-300/40 bg-blue-300/10'} disabled:cursor-not-allowed disabled:opacity-40`}
                 >
                   {viewLabels[view]}
                 </button>
@@ -473,8 +500,10 @@ function App() {
 
         <main className="min-h-[720px] bg-white p-6">
           <section className="fade-in h-full">
-            {currentView === 'queue' ? (
-              <TicketQueueView
+            <Routes>
+              <Route path="/" element={<Navigate to="/queue" replace />} />
+              <Route path="/queue" element={(
+                <QueuePage
                 visibleTickets={visibleTickets}
                 activeFilter={activeFilter}
                 searchTerm={searchTerm}
@@ -482,13 +511,13 @@ function App() {
                 onFilterChange={setActiveFilter}
                 onSearchChange={setSearchTerm}
                 onBeginPrep={beginPrep}
-              />
-            ) : null}
-
-            {currentView === 'overview' ? (
-              <OverviewView
+                />
+              )} />
+              <Route path="/overview/:memberId" element={(
+                <OverviewPage
                 selectedMember={selectedMember}
                 selectedTicket={selectedTicket}
+                selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}
                 selectedGaps={selectedGaps}
@@ -512,11 +541,10 @@ function App() {
                   setDragOverQuestionId(null)
                 }}
                 onSkipQuestion={(questionId) => setQuestionState(questionId, { skipped: true })}
-              />
-            ) : null}
-
-            {currentView === 'deep-dive' ? (
-              <DeepDiveView
+                />
+              )} />
+              <Route path="/deep-dive/:memberId" element={(
+                <DeepDivePage
                 selectedMember={selectedMember}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
@@ -534,11 +562,10 @@ function App() {
                 onFlagForSupervisor={flagForSupervisor}
                 onCompleteCall={completeCall}
                 getSectionProgress={getSectionProgress}
-              />
-            ) : null}
-
-            {currentView === 'summary' && summaryDraft ? (
-              <SummaryView
+                />
+              )} />
+              <Route path="/summary/:memberId" element={(
+                <SummaryPage
                 draft={summaryDraft}
                 onUpdateDraft={updateCarePlanDraft}
                 onUpdateDraftListItem={updateCarePlanDraftListItem}
@@ -550,15 +577,17 @@ function App() {
                 toastVisible={draftToastVisible}
                 sectionQuestions={sectionQuestions}
                 deepDiveResponses={deepDiveStateForMember}
-              />
-            ) : null}
+                />
+              )} />
+              <Route path="*" element={<Navigate to="/queue" replace />} />
+            </Routes>
           </section>
         </main>
 
         {currentView !== 'summary' ? (
           <footer className="no-print flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
             <button
-              onClick={() => setCurrentView(viewOrder[Math.max(0, viewOrder.indexOf(currentView) - 1)])}
+              onClick={() => navigateToView(viewOrder[Math.max(0, viewOrder.indexOf(currentView) - 1)])}
               disabled={viewOrder.indexOf(currentView) === 0}
               className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -568,7 +597,7 @@ function App() {
             <p className="text-sm text-slate-600">Patient in focus: {selectedTicket?.patientName ?? 'None selected'}</p>
 
             <button
-              onClick={() => setCurrentView(viewOrder[Math.min(viewOrder.length - 1, viewOrder.indexOf(currentView) + 1)])}
+              onClick={() => navigateToView(viewOrder[Math.min(viewOrder.length - 1, viewOrder.indexOf(currentView) + 1)])}
               disabled={viewOrder.indexOf(currentView) === viewOrder.length - 1}
               className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
