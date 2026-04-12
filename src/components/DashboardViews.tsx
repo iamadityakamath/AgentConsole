@@ -643,48 +643,71 @@ export function OverviewView({
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
                       {selectedMeds.map((med) => {
-                        const fields: Array<{ label: string; value: string }> = [
-                          { label: 'med_id', value: med.med_id },
-                          { label: 'drug_name', value: med.drug_name },
-                          { label: 'brand_name', value: med.brand_name },
-                          { label: 'dosage', value: med.dosage },
-                          { label: 'route', value: med.route },
-                          { label: 'frequency', value: med.frequency },
-                          { label: 'indication', value: med.indication },
-                          { label: 'prescribing_provider', value: med.prescribing_provider },
-                          { label: 'date_prescribed', value: med.date_prescribed || 'N/A' },
-                          { label: 'last_fill_date', value: med.last_fill_date || 'N/A' },
-                          { label: 'days_since_last_fill', value: String(med.days_since_last_fill) },
-                          { label: 'adherence_status', value: med.adherence_status },
-                          { label: 'medication_status', value: med.medication_status },
-                          { label: 'rx_notes', value: med.rx_notes || 'N/A' },
-                        ]
+                        const refillRisk = med.days_since_last_fill > 90
+                          ? { label: 'Overdue', style: 'border-red-200 bg-red-50 text-red-700' }
+                          : med.days_since_last_fill > 60
+                            ? { label: 'At Risk', style: 'border-amber-200 bg-amber-50 text-amber-700' }
+                            : { label: 'On Track', style: 'border-emerald-200 bg-emerald-50 text-emerald-700' }
+
+                        const medicationStatusStyle = med.medication_status === 'Active'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : med.medication_status === 'On Hold'
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : 'border-slate-200 bg-slate-100 text-slate-700'
 
                         return (
-                          <details key={med.med_id} className="group rounded-lg border border-slate-200 bg-white">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                          <details key={med.med_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(`${med.drug_name} ${med.dosage}`, 72)}</p>
-                                <p className="mt-0.5 text-xs text-slate-600">
-                                  {med.frequency} • Last fill {formatDate(med.last_fill_date)}
-                                </p>
+                                <p className="truncate text-base font-semibold text-slate-900">{truncateText(`${med.drug_name} ${med.dosage}`, 84)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">{med.brand_name} • {med.route} • {med.frequency}</p>
+                                <p className="mt-1 line-clamp-2 text-xs text-slate-500">{med.indication}</p>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'}`}>
+
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${medicationStatusStyle}`}>
+                                  {med.medication_status}
+                                </span>
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${adherenceStyles[med.adherence_status] ?? 'text-slate-600'} border-slate-200 bg-slate-50`}>
                                   {med.adherence_status}
+                                </span>
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${refillRisk.style}`}>
+                                  {refillRisk.label}
                                 </span>
                                 <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
                               </div>
                             </summary>
 
-                            <div className="border-t border-slate-200 bg-slate-50 p-3">
-                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                                {fields.map((field) => (
-                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
-                                  </div>
-                                ))}
+                            <div className="space-y-3 border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Days Since Last Fill</p>
+                                  <p className="mt-1 text-xl font-semibold text-slate-900">{med.days_since_last_fill}d</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Last Fill Date</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(med.last_fill_date)}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Prescribed Date</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(med.date_prescribed)}</p>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Provider</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{med.prescribing_provider}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Medication ID</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{med.med_id}</p>
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Clinical Notes</p>
+                                <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{med.rx_notes || 'N/A'}</p>
                               </div>
                             </div>
                           </details>
@@ -709,50 +732,87 @@ export function OverviewView({
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
                       {selectedAuths.map((auth) => {
-                        const fields: Array<{ label: string; value: string }> = [
-                          { label: 'auth_id', value: auth.auth_id },
-                          { label: 'member_id', value: auth.member_id },
-                          { label: 'patient_name', value: auth.patient_name ?? 'N/A' },
-                          { label: 'gender', value: auth.gender ?? 'N/A' },
-                          { label: 'age', value: auth.age == null ? 'N/A' : String(auth.age) },
-                          { label: 'request_date', value: auth.request_date || 'N/A' },
-                          { label: 'auth_type', value: auth.auth_type },
-                          { label: 'service_requested', value: auth.service_requested },
-                          { label: 'requesting_provider', value: auth.requesting_provider },
-                          { label: 'decision', value: auth.decision },
-                          { label: 'decision_date', value: auth.decision_date || 'N/A' },
-                          { label: 'valid_from', value: auth.valid_from || 'N/A' },
-                          { label: 'valid_through', value: auth.valid_through || 'N/A' },
-                          { label: 'denial_reason', value: auth.denial_reason || 'N/A' },
-                          { label: 'appeal_status', value: auth.appeal_status || 'N/A' },
-                          { label: 'auth_notes', value: auth.auth_notes || 'N/A' },
-                        ]
+                        const decisionStyle = auth.decision === 'Denied'
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : auth.decision === 'Pending'
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : auth.decision === 'Appealed'
+                              ? 'border-violet-200 bg-violet-50 text-violet-700'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+
+                        const expiresSoon = auth.valid_through
+                          ? Math.ceil((new Date(auth.valid_through).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                          : null
+
+                        const validityStyle = expiresSoon != null && expiresSoon < 0
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : expiresSoon != null && expiresSoon <= 30
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+
+                        const validityLabel = auth.valid_through
+                          ? expiresSoon != null && expiresSoon < 0
+                            ? 'Expired'
+                            : expiresSoon != null && expiresSoon <= 30
+                              ? 'Expiring Soon'
+                              : 'Active Window'
+                          : 'No Validity Date'
 
                         return (
-                          <details key={auth.auth_id} className="group rounded-lg border border-slate-200 bg-white">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                          <details key={auth.auth_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(auth.service_requested, 72)}</p>
-                                <p className="mt-0.5 text-xs text-slate-600">
-                                  {auth.auth_type} • {formatDate(auth.request_date)}
-                                </p>
+                                <p className="truncate text-base font-semibold text-slate-900">{truncateText(auth.service_requested, 84)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">{auth.auth_type} • Requested {formatDate(auth.request_date)} • Auth ID {auth.auth_id}</p>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${auth.decision === 'Denied' ? 'border-red-200 bg-red-50 text-red-700' : auth.decision === 'Pending' ? 'border-amber-200 bg-amber-50 text-amber-700' : auth.decision === 'Appealed' ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${decisionStyle}`}>
                                   {auth.decision}
+                                </span>
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${validityStyle}`}>
+                                  {validityLabel}
                                 </span>
                                 <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
                               </div>
                             </summary>
 
-                            <div className="border-t border-slate-200 bg-slate-50 p-3">
-                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                                {fields.map((field) => (
-                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
-                                  </div>
-                                ))}
+                            <div className="space-y-3 border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Decision Date</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(auth.decision_date)}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Valid From</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(auth.valid_from)}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Valid Through</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{formatDate(auth.valid_through)}</p>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Requesting Provider</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{auth.requesting_provider}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Appeal Status</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{auth.appeal_status || 'N/A'}</p>
+                                </div>
+                              </div>
+
+                              {auth.denial_reason ? (
+                                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-red-600">Denial Reason</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-red-800">{auth.denial_reason}</p>
+                                </div>
+                              ) : null}
+
+                              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Authorization Notes</p>
+                                <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{auth.auth_notes || 'N/A'}</p>
                               </div>
                             </div>
                           </details>
@@ -777,46 +837,77 @@ export function OverviewView({
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
                       {selectedNotes.map((note) => {
-                        const fields: Array<{ label: string; value: string }> = [
-                          { label: 'note_id', value: note.note_id },
-                          { label: 'member_id', value: note.member_id },
-                          { label: 'patient_name', value: note.patient_name ?? 'N/A' },
-                          { label: 'gender', value: note.gender ?? 'N/A' },
-                          { label: 'age', value: note.age == null ? 'N/A' : String(note.age) },
-                          { label: 'location', value: note.location ?? 'N/A' },
-                          { label: 'note_date', value: note.note_date || 'N/A' },
-                          { label: 'note_type', value: note.note_type },
-                          { label: 'provider_name', value: note.provider_name },
-                          { label: 'facility_name', value: note.facility_name },
-                          { label: 'icd_code', value: note.icd_code },
-                          { label: 'primary_diagnosis', value: note.primary_diagnosis },
-                          { label: 'subjective', value: note.subjective },
-                          { label: 'objective', value: note.objective },
-                          { label: 'assessment', value: note.assessment },
-                          { label: 'plan', value: note.plan },
-                          { label: 'follow_up_date', value: note.follow_up_date || 'N/A' },
-                        ]
+                        const noteTypeStyle = note.note_type.toLowerCase().includes('er') || note.note_type.toLowerCase().includes('urgent')
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : note.note_type.toLowerCase().includes('discharge')
+                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                            : 'border-sky-200 bg-sky-50 text-sky-700'
+
+                        const followUpStatus = note.follow_up_date
+                          ? new Date(note.follow_up_date).getTime() < Date.now()
+                            ? { label: 'Follow-up Overdue', style: 'border-red-200 bg-red-50 text-red-700' }
+                            : { label: 'Follow-up Scheduled', style: 'border-emerald-200 bg-emerald-50 text-emerald-700' }
+                          : { label: 'No Follow-up Date', style: 'border-slate-200 bg-slate-100 text-slate-700' }
 
                         return (
-                          <details key={note.note_id} className="group rounded-lg border border-slate-200 bg-white">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
+                          <details key={note.note_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(note.primary_diagnosis, 72)}</p>
-                                <p className="mt-0.5 text-xs text-slate-600">
-                                  {note.note_type} • {formatDate(note.note_date)}
-                                </p>
+                                <p className="truncate text-base font-semibold text-slate-900">{truncateText(note.primary_diagnosis, 84)}</p>
+                                <p className="mt-0.5 text-xs text-slate-600">{formatDate(note.note_date)} • ICD {note.icd_code} • Note ID {note.note_id}</p>
                               </div>
-                              <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${noteTypeStyle}`}>
+                                  {note.note_type}
+                                </span>
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${followUpStatus.style}`}>
+                                  {followUpStatus.label}
+                                </span>
+                                <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
+                              </div>
                             </summary>
 
-                            <div className="border-t border-slate-200 bg-slate-50 p-3">
-                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                                {fields.map((field) => (
-                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
-                                  </div>
-                                ))}
+                            <div className="space-y-3 border-t border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Provider</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.provider_name}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Facility</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.facility_name}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Follow-up Date</p>
+                                  <p className="mt-1 text-sm font-medium text-slate-900">{note.follow_up_date ? formatDate(note.follow_up_date) : 'N/A'}</p>
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Location</p>
+                                <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.location ?? 'N/A'}</p>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Subjective</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.subjective}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Objective</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.objective}</p>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Assessment</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.assessment}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Plan</p>
+                                  <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{note.plan}</p>
+                                </div>
                               </div>
                             </div>
                           </details>
