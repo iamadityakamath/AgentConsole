@@ -286,6 +286,7 @@ export function OverviewView({
   onSkipQuestion,
 }: OverviewViewProps) {
   const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
+  const [labFilterByDate, setLabFilterByDate] = useState<Record<string, 'All' | 'High' | 'Low'>>({})
 
   const panelItems: Array<{ id: 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'; label: string }> = [
     { id: 'demographics', label: 'Patient Demographics' },
@@ -323,8 +324,8 @@ export function OverviewView({
         rows: [
           { label: 'Phone Primary', value: selectedPatientDetail.phone_primary ?? 'N/A' },
           { label: 'Phone Secondary', value: selectedPatientDetail.phone_secondary ?? 'N/A' },
-          { label: 'Email Address', value: selectedPatientDetail.email_address ?? 'N/A' },
           { label: 'Preferred Contact Method', value: selectedPatientDetail.preferred_contact_method ?? 'N/A' },
+          { label: 'Email Address', value: selectedPatientDetail.email_address ?? 'N/A' },
         ],
       },
       {
@@ -387,37 +388,47 @@ export function OverviewView({
                   ) : null}
                   {!patientDetailLoading && !patientDetailError && selectedPatientDetail ? (
                     <div className="mt-3 space-y-3">
-                      <div className="rounded-lg border border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50 px-4 py-3">
-                        <p className="text-lg font-semibold text-slate-900">{selectedPatientDetail.full_name}</p>
-                        <p className="mt-1 inline-flex rounded-md bg-white px-2 py-0.5 font-mono text-xs text-slate-700">
-                          {selectedPatientDetail.member_id}
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="inline-flex rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700">
-                            {selectedPatientDetail.age}{selectedPatientDetail.gender}
-                          </span>
-                          <span className="inline-flex rounded-full border border-blue-200 bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            {selectedPatientDetail.risk_tier ?? 'N/A'}
-                          </span>
-                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                            {selectedPatientDetail.preferred_contact_method ?? 'N/A'}
-                          </span>
+                      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/70 shadow-[0_1px_20px_rgba(15,23,42,0.06)]">
+                        <div className="border-b border-slate-200/80 px-5 py-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Patient Snapshot</p>
+                              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{selectedPatientDetail.full_name}</p>
+                              <p className="mt-1 text-sm text-slate-600">Member ID {selectedPatientDetail.member_id}</p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                              <span className="inline-flex rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+                                {selectedPatientDetail.age} · {selectedPatientDetail.gender}
+                              </span>
+                              <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 shadow-sm">
+                                {selectedPatientDetail.risk_tier ?? 'N/A'}
+                              </span>
+                              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 shadow-sm">
+                                {selectedPatientDetail.preferred_contact_method ?? 'N/A'}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                      <div className="space-y-3">
                         {demographicsSections.map((section) => (
-                          <div key={section.title} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{section.title}</p>
-                            <div className="space-y-1.5">
+                          <section key={section.title} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section.title}</p>
+                            </div>
+                            <div className="grid grid-cols-1 gap-px bg-slate-100 md:grid-cols-2 xl:grid-cols-3">
                               {section.rows.map((row) => (
-                                <div key={row.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{row.label}</p>
-                                  <p className="mt-1 min-w-0 break-words text-sm leading-snug text-slate-800">{row.value}</p>
+                                <div
+                                  key={row.label}
+                                  className={`bg-white px-4 py-3 transition-colors hover:bg-slate-50/80 ${section.title === 'Contact' && row.label === 'Email Address' ? 'md:col-span-2 xl:col-span-3' : ''}`}
+                                >
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{row.label}</p>
+                                  <p className="mt-1 min-w-0 break-words text-sm leading-6 text-slate-900">{row.value}</p>
                                 </div>
                               ))}
                             </div>
-                          </div>
+                          </section>
                         ))}
                       </div>
                     </div>
@@ -437,7 +448,7 @@ export function OverviewView({
                   {!careGapsLoading && !careGapsError && selectedGaps.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
                   ) : (
-                    <div className="mt-2 space-y-3 pr-1 text-sm">
+                    <div className="mt-2 space-y-2 pr-1 text-sm">
                       {selectedGaps.map((gap) => {
                         const fields: Array<{ label: string; value: string }> = [
                           { label: 'gap_id', value: gap.gap_id },
@@ -474,12 +485,12 @@ export function OverviewView({
                               </div>
                             </summary>
 
-                            <div className="border-t border-slate-200 bg-slate-50 p-3">
-                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                            <div className="border-t border-slate-200 bg-slate-50 p-2.5">
+                              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl bg-slate-100 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                 {fields.map((field) => (
-                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
+                                  <div key={field.label} className="min-h-[58px] bg-white px-3 py-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{field.label}</p>
+                                    <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{field.value}</p>
                                   </div>
                                 ))}
                               </div>
@@ -505,56 +516,114 @@ export function OverviewView({
                     <p className="mt-2 text-sm text-slate-500">No lab results on file for this patient.</p>
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
-                      {selectedLabs.map((lab) => {
-                        const fields: Array<{ label: string; value: string }> = [
-                          { label: 'lab_id', value: lab.lab_id },
-                          { label: 'member_id', value: lab.member_id },
-                          { label: 'patient_name', value: lab.patient_name ?? 'N/A' },
-                          { label: 'gender', value: lab.gender ?? 'N/A' },
-                          { label: 'age', value: lab.age == null ? 'N/A' : String(lab.age) },
-                          { label: 'draw_date', value: lab.draw_date || 'N/A' },
-                          { label: 'lab_type', value: lab.lab_type },
-                          { label: 'test_name', value: lab.test_name },
-                          { label: 'result_value', value: String(lab.result_value) },
-                          { label: 'unit', value: lab.unit },
-                          { label: 'reference_range', value: lab.reference_range },
-                          { label: 'result_flag', value: lab.result_flag },
-                          { label: 'ordering_provider', value: lab.ordering_provider },
-                          { label: 'lab_facility', value: lab.lab_facility },
-                          { label: 'status', value: lab.status },
-                          { label: 'clinical_note', value: lab.clinical_note },
-                        ]
+                      {Object.entries(
+                        selectedLabs.reduce<Record<string, typeof selectedLabs>>((acc, lab) => {
+                          const list = acc[lab.draw_date] ?? []
+                          list.push(lab)
+                          acc[lab.draw_date] = list
+                          return acc
+                        }, {}),
+                      )
+                        .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
+                        .map(([drawDate, labsForDate], dateIndex) => {
+                          const filter = labFilterByDate[drawDate] ?? 'All'
+                          const visibleLabsForDate = filter === 'All'
+                            ? labsForDate
+                            : filter === 'High'
+                              ? labsForDate.filter((lab) => lab.result_flag === 'High' || lab.result_flag === 'Critical High')
+                              : labsForDate.filter((lab) => lab.result_flag === 'Low' || lab.result_flag === 'Critical Low')
+                          const highCount = labsForDate.filter((lab) => lab.result_flag === 'High' || lab.result_flag === 'Critical High').length
+                          const lowCount = labsForDate.filter((lab) => lab.result_flag === 'Low' || lab.result_flag === 'Critical Low').length
 
-                        return (
-                          <details key={lab.lab_id} className="group rounded-lg border border-slate-200 bg-white">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-800">{truncateText(lab.test_name, 72)}</p>
-                                <p className="mt-0.5 text-xs text-slate-600">
-                                  {lab.lab_type} • {formatDate(lab.draw_date)} • {lab.result_value} {lab.unit}
-                                </p>
+                          return (
+                          <details key={drawDate} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]" open={dateIndex === 0}>
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Draw Date</p>
+                                <p className="mt-1 text-base font-semibold text-slate-900">{formatDate(drawDate)}</p>
+                                <p className="mt-0.5 text-xs text-slate-500">All reports collected on this date</p>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className={`inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>
-                                  {lab.result_flag}
+                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                                  {labsForDate.length} report{labsForDate.length === 1 ? '' : 's'}
                                 </span>
                                 <span className="text-xs text-slate-500 transition group-open:rotate-180">▼</span>
                               </div>
                             </summary>
 
-                            <div className="border-t border-slate-200 bg-slate-50 p-3">
-                              <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                                {fields.map((field) => (
-                                  <div key={field.label} className="rounded border border-slate-200 bg-white px-2 py-1.5">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{field.label}</p>
-                                    <p className="mt-1 break-words text-sm text-slate-800">{field.value}</p>
-                                  </div>
+                            <div className="space-y-2 border-t border-slate-200 bg-slate-50 p-2.5">
+                              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filter</span>
+                                {(['All', 'High', 'Low'] as const).map((option) => (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    onClick={() => setLabFilterByDate((prev) => ({ ...prev, [drawDate]: option }))}
+                                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${filter === option ? 'border-clinical-header bg-clinical-header text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
+                                  >
+                                    {option}
+                                  </button>
                                 ))}
+                                <span className="ml-auto text-xs text-slate-500">
+                                  High: {highCount} • Low: {lowCount}
+                                </span>
                               </div>
+
+                              {visibleLabsForDate.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
+                                  No results for the selected filter on this date.
+                                </div>
+                              ) : null}
+
+                              {visibleLabsForDate.map((lab) => (
+                                <article
+                                  key={lab.lab_id}
+                                  className={`rounded-2xl border bg-white p-3 shadow-sm ${lab.result_flag === 'Critical High' || lab.result_flag === 'Critical Low' ? 'border-red-200 ring-1 ring-red-100' : lab.result_flag === 'High' || lab.result_flag === 'Low' ? 'border-amber-200 ring-1 ring-amber-100' : 'border-slate-200'}`}
+                                >
+                                  <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2.5">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold text-slate-900">{lab.test_name}</p>
+                                      <p className="mt-0.5 text-xs text-slate-500">{lab.lab_type} • {formatDate(lab.draw_date)} • Lab ID {lab.lab_id}</p>
+                                    </div>
+                                    <span className={`inline-flex shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>
+                                      {lab.result_flag}
+                                    </span>
+                                  </div>
+
+                                    <div className="mt-3 space-y-3">
+                                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        <div className="rounded-2xl bg-slate-50 p-3 md:col-span-1">
+                                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Result Value</p>
+                                          <p className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">{lab.result_value}</p>
+                                          <p className="mt-1 text-sm text-slate-600">{lab.unit}</p>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-1">
+                                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Reference Range</p>
+                                          <p className="mt-1 break-words text-sm leading-6 text-slate-900">{lab.reference_range}</p>
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Provider Name</p>
+                                        <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{lab.ordering_provider}</p>
+                                      </div>
+
+                                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Facility</p>
+                                        <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{lab.lab_facility}</p>
+                                      </div>
+                                  </div>
+
+                                  <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Clinical Note</p>
+                                    <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{lab.clinical_note}</p>
+                                  </div>
+                                </article>
+                              ))}
                             </div>
                           </details>
-                        )
-                      })}
+                        )})}
                     </div>
                   )}
                 </>
@@ -576,10 +645,6 @@ export function OverviewView({
                       {selectedMeds.map((med) => {
                         const fields: Array<{ label: string; value: string }> = [
                           { label: 'med_id', value: med.med_id },
-                          { label: 'member_id', value: med.member_id },
-                          { label: 'patient_name', value: med.patient_name ?? 'N/A' },
-                          { label: 'gender', value: med.gender ?? 'N/A' },
-                          { label: 'age', value: med.age == null ? 'N/A' : String(med.age) },
                           { label: 'drug_name', value: med.drug_name },
                           { label: 'brand_name', value: med.brand_name },
                           { label: 'dosage', value: med.dosage },
