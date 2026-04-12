@@ -431,11 +431,6 @@ function App() {
     navigate(`/overview/${encodeURIComponent(memberId)}`)
   }
 
-  function beginCall() {
-    if (selectedMemberId) setActiveDeepDiveSection('clinical')
-    if (selectedMemberId) navigate(`/deep-dive/${encodeURIComponent(selectedMemberId)}`)
-  }
-
   function flagForSupervisor() {
     if (!selectedMemberId || !selectedTicket) return
 
@@ -750,7 +745,6 @@ function App() {
                 draggingQuestionId={draggingQuestionId}
                 dragOverQuestionId={dragOverQuestionId}
                 onQuestionStateChange={setQuestionState}
-                onBeginCall={beginCall}
                 onNewQuestionTextChange={setNewQuestionText}
                 onNewQuestionCategoryChange={setNewQuestionCategory}
                 onAddCustomQuestion={addCustomQuestion}

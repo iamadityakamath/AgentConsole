@@ -236,7 +236,6 @@ interface OverviewViewProps {
   onQuestionStateChange: (questionId: string, patch: Partial<QuestionUIState>) => void
   onFilterChange?: never
   onSearchChange?: never
-  onBeginCall: () => void
   onNewQuestionTextChange: (value: string) => void
   onNewQuestionCategoryChange: (category: QuestionCategory) => void
   onAddCustomQuestion: () => void
@@ -245,6 +244,198 @@ interface OverviewViewProps {
   onDrop: (questionId: string) => void
   onDragEnd: () => void
   onSkipQuestion: (questionId: string) => void
+}
+
+interface AiTimelineEvent {
+  date: string
+  event_type: string
+  title: string
+  description: string
+  source_position_id: string
+  related_position_ids?: string[]
+  clinical_significance?: string
+}
+
+interface AiCoordinatorQuestion {
+  question_id: string
+  source_position_id: string
+  source_type: string
+  source_label: string
+  category: string
+  priority: string
+  question_text: string
+  clinical_context?: string
+}
+
+interface AiSuggestionsResponse {
+  clinical_story?: string
+  timeline_events?: AiTimelineEvent[]
+  coordinator_questions?: AiCoordinatorQuestion[]
+  missed_follow_ups?: Array<{
+    source_position_id: string
+    note_date: string
+    follow_up_date_recommended: string
+    follow_up_found: boolean
+    days_overdue: number
+    clinical_risk: string
+  }>
+  medication_risk_connections?: Array<{
+    source_position_id: string
+    drug_name: string
+    adherence_status: string
+    days_since_last_fill: number
+    connected_lab_position_ids: string[]
+    connected_gap_position_ids: string[]
+    connected_note_position_ids: string[]
+    risk_summary: string
+  }>
+  coordinator_alerts?: Array<{
+    rank: number
+    alert_title: string
+    connected_position_ids: string[]
+    reason: string
+    suggested_opening: string
+  }>
+}
+
+function parseJsonString(value: string): unknown | null {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function parseUnknownArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value === 'string') {
+    const parsed = parseJsonString(value)
+    if (Array.isArray(parsed)) return parsed as T[]
+  }
+  return []
+}
+
+function normalizeAiSuggestionsResponse(value: unknown): AiSuggestionsResponse | null {
+  if (!value || typeof value !== 'object') return null
+
+  const candidate = value as Record<string, unknown>
+
+  const clinicalStory =
+    candidate.clinical_story ??
+    candidate.patient_summary ??
+    candidate.summary ??
+    candidate.clinicalSummary
+
+  const timelineEvents =
+    candidate.timeline_events ??
+    candidate.timeline ??
+    candidate.events
+
+  const coordinatorQuestions =
+    candidate.coordinator_questions ??
+    candidate.suggested_questions ??
+    candidate.questions
+
+  const coordinatorAlerts =
+    candidate.coordinator_alerts ??
+    candidate.alerts
+
+  const missedFollowUps =
+    candidate.missed_follow_ups ??
+    candidate.follow_ups ??
+    candidate.missedFollowUps
+
+  const medicationRiskConnections =
+    candidate.medication_risk_connections ??
+    candidate.medication_risks ??
+    candidate.risk_connections
+
+  const normalized: AiSuggestionsResponse = {}
+
+  if (typeof clinicalStory === 'string' && clinicalStory.trim()) {
+    normalized.clinical_story = clinicalStory
+  }
+
+  const timeline = parseUnknownArray<AiTimelineEvent>(timelineEvents)
+  if (timeline.length > 0) {
+    normalized.timeline_events = timeline
+  }
+
+  const questions = parseUnknownArray<AiCoordinatorQuestion>(coordinatorQuestions)
+  if (questions.length > 0) {
+    normalized.coordinator_questions = questions
+  }
+
+  const alerts = parseUnknownArray<NonNullable<AiSuggestionsResponse['coordinator_alerts']>[number]>(coordinatorAlerts)
+  if (alerts.length > 0) {
+    normalized.coordinator_alerts = alerts
+  }
+
+  const followUps = parseUnknownArray<NonNullable<AiSuggestionsResponse['missed_follow_ups']>[number]>(missedFollowUps)
+  if (followUps.length > 0) {
+    normalized.missed_follow_ups = followUps
+  }
+
+  const risks = parseUnknownArray<NonNullable<AiSuggestionsResponse['medication_risk_connections']>[number]>(medicationRiskConnections)
+  if (risks.length > 0) {
+    normalized.medication_risk_connections = risks
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null
+}
+
+function parseAiSuggestionsResponse(raw: unknown): AiSuggestionsResponse | null {
+  if (!raw || typeof raw !== 'object') return null
+
+  const candidate = raw as Record<string, unknown>
+
+  const normalizedDirect = normalizeAiSuggestionsResponse(candidate)
+  if (normalizedDirect) {
+    return normalizedDirect
+  }
+
+  const nestedContainers: unknown[] = [
+    candidate.chatgpt_response,
+    candidate.data,
+    candidate.result,
+    candidate.response,
+    candidate.payload,
+  ]
+  for (const container of nestedContainers) {
+    const normalized = normalizeAiSuggestionsResponse(container)
+    if (normalized) {
+      return normalized
+    }
+  }
+
+  if (typeof candidate.chatgpt_response === 'string') {
+    const cleaned = candidate.chatgpt_response
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```$/i, '')
+      .trim()
+
+    try {
+      const parsed = JSON.parse(cleaned) as unknown
+      const normalized = normalizeAiSuggestionsResponse(parsed)
+      if (normalized) {
+        return normalized
+      }
+    } catch {
+      return null
+    }
+  }
+
+  if (typeof candidate.message === 'string') {
+    const parsed = parseJsonString(candidate.message)
+    const normalized = normalizeAiSuggestionsResponse(parsed)
+    if (normalized) {
+      return normalized
+    }
+  }
+
+  return null
 }
 
 export function OverviewView({
@@ -275,7 +466,6 @@ export function OverviewView({
   draggingQuestionId,
   dragOverQuestionId,
   onQuestionStateChange,
-  onBeginCall,
   onNewQuestionTextChange,
   onNewQuestionCategoryChange,
   onAddCustomQuestion,
@@ -287,11 +477,15 @@ export function OverviewView({
 }: OverviewViewProps) {
   const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
   const [labFilterByDate, setLabFilterByDate] = useState<Record<string, 'All' | 'High' | 'Low'>>({})
+  const [expandedGapSectionId, setExpandedGapSectionId] = useState<string | null>(null)
+  const [expandedLabDate, setExpandedLabDate] = useState<string | null>(null)
   const [expandedMedicationSectionId, setExpandedMedicationSectionId] = useState<string | null>(null)
   const [expandedPriorAuthSectionId, setExpandedPriorAuthSectionId] = useState<string | null>(null)
   const [expandedEhrNoteSectionId, setExpandedEhrNoteSectionId] = useState<string | null>(null)
   const [aiSuggestionsLoading, setAiSuggestionsLoading] = useState(false)
   const [aiSuggestionsError, setAiSuggestionsError] = useState('')
+  const [aiSuggestionsData, setAiSuggestionsData] = useState<AiSuggestionsResponse | null>(null)
+  const [aiInsightsSection, setAiInsightsSection] = useState<'summary' | 'timeline' | 'questions'>('summary')
 
   const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
 
@@ -431,12 +625,68 @@ export function OverviewView({
       }
 
       const responseBody = await response.json().catch(() => null)
+      const parsedResponse = parseAiSuggestionsResponse(responseBody)
+      setAiSuggestionsData(parsedResponse)
+      if (!parsedResponse) {
+        setAiSuggestionsError('Received AI response, but could not parse chatgpt_response JSON payload.')
+      }
+      setAiInsightsSection('summary')
       console.log('AI suggestions response:', responseBody)
     } catch (error) {
       setAiSuggestionsError(error instanceof Error ? error.message : 'AI suggestions request failed')
     } finally {
       setAiSuggestionsLoading(false)
     }
+  }
+
+  function focusSourceSection(sourcePositionId: string) {
+    const sourceMatch = /^(gap|lab|med|auth|note)-section-(\d+)$/.exec(sourcePositionId)
+    if (!sourceMatch) return
+
+    const [, type, indexRaw] = sourceMatch
+    const index = Number(indexRaw)
+    if (Number.isNaN(index) || index <= 0) return
+
+    if (type === 'gap') {
+      if (index > selectedGaps.length) return
+      setActivePanel('gaps')
+      setExpandedGapSectionId(sourcePositionId)
+    }
+
+    if (type === 'lab') {
+      if (index > selectedLabs.length) return
+      setActivePanel('labs')
+
+      const targetLab = selectedLabs[index - 1]
+      if (targetLab?.draw_date) {
+        setExpandedLabDate(targetLab.draw_date)
+      }
+    }
+
+    if (type === 'med') {
+      if (index > selectedMeds.length) return
+      setActivePanel('medications')
+      setExpandedMedicationSectionId(sourcePositionId)
+    }
+
+    if (type === 'auth') {
+      if (index > selectedAuths.length) return
+      setActivePanel('auths')
+      setExpandedPriorAuthSectionId(sourcePositionId)
+    }
+
+    if (type === 'note') {
+      if (index > selectedNotes.length) return
+      setActivePanel('notes')
+      setExpandedEhrNoteSectionId(sourcePositionId)
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(sourcePositionId)
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    })
   }
 
   useEffect(() => {
@@ -674,7 +924,9 @@ export function OverviewView({
                     <p className="mt-2 text-sm text-slate-500">No open care gaps for this patient.</p>
                   ) : (
                     <div className="mt-2 space-y-2 pr-1 text-sm">
-                      {selectedGaps.map((gap) => {
+                      {selectedGaps.map((gap, sectionIndex) => {
+                        const sectionId = `gap-section-${sectionIndex + 1}`
+                        const isOpen = expandedGapSectionId ? expandedGapSectionId === sectionId : sectionIndex === 0
                         const fields: Array<{ label: string; value: string }> = [
                           { label: 'gap_id', value: gap.gap_id },
                           { label: 'member_id', value: gap.member_id },
@@ -694,7 +946,7 @@ export function OverviewView({
                         ]
 
                         return (
-                          <details key={gap.gap_id} className="group rounded-lg border border-slate-200 bg-white">
+                          <details id={sectionId} key={gap.gap_id} open={isOpen} className="group rounded-lg border border-slate-200 bg-white">
                             <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 hover:bg-slate-50">
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-slate-800">{truncateText(gap.gap_description, 72)}</p>
@@ -761,7 +1013,7 @@ export function OverviewView({
                           const lowCount = labsForDate.filter((lab) => lab.result_flag === 'Low' || lab.result_flag === 'Critical Low').length
 
                           return (
-                          <details key={drawDate} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]" open={dateIndex === 0}>
+                          <details key={drawDate} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]" open={expandedLabDate ? expandedLabDate === drawDate : dateIndex === 0}>
                             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
                               <div>
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Draw Date</p>
@@ -800,8 +1052,12 @@ export function OverviewView({
                                 </div>
                               ) : null}
 
-                              {visibleLabsForDate.map((lab) => (
+                              {visibleLabsForDate.map((lab) => {
+                                const sectionId = `lab-section-${selectedLabs.findIndex((candidate) => candidate.lab_id === lab.lab_id) + 1}`
+
+                                return (
                                 <article
+                                  id={sectionId}
                                   key={lab.lab_id}
                                   className={`rounded-2xl border bg-white p-3 shadow-sm ${lab.result_flag === 'Critical High' || lab.result_flag === 'Critical Low' ? 'border-red-200 ring-1 ring-red-100' : lab.result_flag === 'High' || lab.result_flag === 'Low' ? 'border-amber-200 ring-1 ring-amber-100' : 'border-slate-200'}`}
                                 >
@@ -845,7 +1101,7 @@ export function OverviewView({
                                     <p className="mt-1 break-words text-[13px] leading-5 text-slate-900">{lab.clinical_note}</p>
                                   </div>
                                 </article>
-                              ))}
+                                )})}
                             </div>
                           </details>
                         )})}
@@ -1180,132 +1436,362 @@ export function OverviewView({
 
           <div className="col-span-7 flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
-                <button
-                  type="button"
-                  onClick={handleAiSuggestionsClick}
-                  className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                >
-                  {aiSuggestionsLoading ? 'Sending...' : 'AI Suggestions'}
-                </button>
-              </div>
-              <p className="text-sm text-slate-500">
-                {visibleQuestions.filter((q) => questionStateForMember[q.id]?.checked).length}/{visibleQuestions.length} covered
-              </p>
+              <h2 className="text-xl font-semibold text-slate-800">AI Insights</h2>
+              <button
+                type="button"
+                onClick={handleAiSuggestionsClick}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+              >
+                {aiSuggestionsLoading ? 'Sending...' : 'AI Suggestions'}
+              </button>
             </div>
 
             {aiSuggestionsError ? (
               <p className="mb-3 text-sm text-red-700">{aiSuggestionsError}</p>
             ) : null}
 
-            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Custom Question</p>
-              <div className="flex items-center gap-2">
-                <select
-                  value={newQuestionCategory}
-                  onChange={(event) => onNewQuestionCategoryChange(event.target.value as QuestionCategory)}
-                  className="w-[140px] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-clinical-header"
-                >
-                  <option value="Social">Social</option>
-                  <option value="Care Gaps">Care Gaps</option>
-                  <option value="Labs">Labs</option>
-                  <option value="Medication">Medication</option>
-                  <option value="Prior Auth">Prior Auth</option>
-                  <option value="Utilization">Utilization</option>
-                </select>
-                <input
-                  type="text"
-                  value={newQuestionText}
-                  onChange={(event) => onNewQuestionTextChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      onAddCustomQuestion()
-                    }
-                  }}
-                  placeholder="Type a custom question for this patient"
-                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
-                />
-                <button
-                  onClick={onAddCustomQuestion}
-                  className="rounded-md bg-clinical-header px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
-                >
-                  Add
-                </button>
+            <div className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-3">
+              <aside className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Insight Sections</p>
+                <div className="mt-1 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setAiInsightsSection('summary')}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${aiInsightsSection === 'summary' ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    Patient Summary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiInsightsSection('timeline')}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${aiInsightsSection === 'timeline' ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    Timeline Events
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiInsightsSection('questions')}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${aiInsightsSection === 'questions' ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    Suggested Questions
+                  </button>
+                </div>
+              </aside>
+
+              <div className="min-h-0 overflow-y-auto pr-1">
+                {aiInsightsSection === 'summary' ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Clinical Story</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-800">
+                        {aiSuggestionsData?.clinical_story ?? 'Click AI Suggestions to generate a patient summary.'}
+                      </p>
+                    </div>
+
+                    {aiSuggestionsData?.coordinator_alerts && aiSuggestionsData.coordinator_alerts.length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Coordinator Alerts</p>
+                        <div className="mt-2 space-y-2">
+                          {aiSuggestionsData.coordinator_alerts
+                            .slice()
+                            .sort((a, b) => a.rank - b.rank)
+                            .map((alert) => (
+                              <article key={`${alert.rank}-${alert.alert_title}`} className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Rank {alert.rank}</p>
+                                <p className="mt-1 text-sm font-semibold text-red-900">{alert.alert_title}</p>
+                                <p className="mt-1 text-sm text-red-800">{alert.reason}</p>
+                                <p className="mt-1 text-xs text-red-700">Suggested opening: {alert.suggested_opening}</p>
+                                <p className="mt-1 text-xs text-red-700">
+                                  Linked IDs:{' '}
+                                  {alert.connected_position_ids.map((id, idx) => (
+                                    <span key={id}>
+                                      <button
+                                        type="button"
+                                        onClick={() => focusSourceSection(id)}
+                                        className="underline underline-offset-2 hover:text-red-900"
+                                      >
+                                        {id}
+                                      </button>
+                                      {idx < alert.connected_position_ids.length - 1 ? ', ' : ''}
+                                    </span>
+                                  ))}
+                                </p>
+                              </article>
+                            ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {aiSuggestionsData?.missed_follow_ups && aiSuggestionsData.missed_follow_ups.length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Missed Follow-Ups</p>
+                        <div className="mt-2 space-y-2">
+                          {aiSuggestionsData.missed_follow_ups.map((item) => (
+                            <article key={`${item.source_position_id}-${item.follow_up_date_recommended}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                <button
+                                  type="button"
+                                  onClick={() => focusSourceSection(item.source_position_id)}
+                                  className="underline underline-offset-2 hover:text-amber-900"
+                                >
+                                  {item.source_position_id}
+                                </button>
+                              </p>
+                              <p className="mt-1 text-sm text-amber-900">Recommended: {formatDate(item.follow_up_date_recommended)} • Overdue: {item.days_overdue} days</p>
+                              <p className="mt-1 text-sm text-amber-800">{item.clinical_risk}</p>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {aiSuggestionsData?.medication_risk_connections && aiSuggestionsData.medication_risk_connections.length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Medication Risk Connections</p>
+                        <div className="mt-2 space-y-2">
+                          {aiSuggestionsData.medication_risk_connections.map((item) => (
+                            <article key={`${item.source_position_id}-${item.drug_name}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-sm font-semibold text-slate-900">{item.drug_name} • {item.adherence_status}</p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                <button
+                                  type="button"
+                                  onClick={() => focusSourceSection(item.source_position_id)}
+                                  className="underline underline-offset-2 hover:text-slate-800"
+                                >
+                                  {item.source_position_id}
+                                </button>
+                                {' • '}
+                                {item.days_since_last_fill} days since fill
+                              </p>
+                              <p className="mt-1 text-sm text-slate-800">{item.risk_summary}</p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                Labs:{' '}
+                                {item.connected_lab_position_ids.length > 0
+                                  ? item.connected_lab_position_ids.map((id, idx) => (
+                                    <span key={id}>
+                                      <button type="button" onClick={() => focusSourceSection(id)} className="underline underline-offset-2 hover:text-slate-800">{id}</button>
+                                      {idx < item.connected_lab_position_ids.length - 1 ? ', ' : ''}
+                                    </span>
+                                  ))
+                                  : 'None'}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                Care gaps:{' '}
+                                {item.connected_gap_position_ids.length > 0
+                                  ? item.connected_gap_position_ids.map((id, idx) => (
+                                    <span key={id}>
+                                      <button type="button" onClick={() => focusSourceSection(id)} className="underline underline-offset-2 hover:text-slate-800">{id}</button>
+                                      {idx < item.connected_gap_position_ids.length - 1 ? ', ' : ''}
+                                    </span>
+                                  ))
+                                  : 'None'}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                Notes:{' '}
+                                {item.connected_note_position_ids.length > 0
+                                  ? item.connected_note_position_ids.map((id, idx) => (
+                                    <span key={id}>
+                                      <button type="button" onClick={() => focusSourceSection(id)} className="underline underline-offset-2 hover:text-slate-800">{id}</button>
+                                      {idx < item.connected_note_position_ids.length - 1 ? ', ' : ''}
+                                    </span>
+                                  ))
+                                  : 'None'}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {aiInsightsSection === 'timeline' ? (
+                  <div className="space-y-2">
+                    {aiSuggestionsData?.timeline_events && aiSuggestionsData.timeline_events.length > 0 ? (
+                      aiSuggestionsData.timeline_events
+                        .slice()
+                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                        .map((event) => (
+                          <article key={`${event.source_position_id}-${event.date}-${event.title}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{formatDate(event.date)}</p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">{event.title}</p>
+                                <p className="mt-1 text-sm text-slate-700">{event.description}</p>
+                                <p className="mt-2 text-xs text-slate-500">
+                                  Source:{' '}
+                                  <button
+                                    type="button"
+                                    onClick={() => focusSourceSection(event.source_position_id)}
+                                    className="underline underline-offset-2 hover:text-slate-700"
+                                  >
+                                    {event.source_position_id}
+                                  </button>
+                                </p>
+                                {event.related_position_ids && event.related_position_ids.length > 0 ? (
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    Related:{' '}
+                                    {event.related_position_ids.map((id, idx, arr) => (
+                                      <span key={id}>
+                                        <button type="button" onClick={() => focusSourceSection(id)} className="underline underline-offset-2 hover:text-slate-700">{id}</button>
+                                        {idx < arr.length - 1 ? ', ' : ''}
+                                      </span>
+                                    ))}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${event.clinical_significance === 'critical' ? 'border-red-200 bg-red-50 text-red-700' : event.clinical_significance === 'high' ? 'border-amber-200 bg-amber-50 text-amber-700' : event.clinical_significance === 'medium' ? 'border-yellow-200 bg-yellow-50 text-yellow-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                {(event.clinical_significance ?? 'info').toUpperCase()}
+                              </span>
+                            </div>
+                          </article>
+                        ))
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+                        Click AI Suggestions to generate timeline events.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {aiInsightsSection === 'questions' ? (
+                  <>
+                    {aiSuggestionsData?.coordinator_questions && aiSuggestionsData.coordinator_questions.length > 0 ? (
+                      <div className="mb-3 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">AI Generated Questions</p>
+                        {aiSuggestionsData.coordinator_questions.map((item) => (
+                          <article key={item.question_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{item.category}</p>
+                                <p className="mt-1 text-xs text-slate-600">{item.source_label}</p>
+                                <p className="mt-1 text-sm text-slate-800">{item.question_text}</p>
+                                <p className="mt-2 text-xs text-slate-500">
+                                  Source:{' '}
+                                  <button
+                                    type="button"
+                                    onClick={() => focusSourceSection(item.source_position_id)}
+                                    className="underline underline-offset-2 hover:text-slate-700"
+                                  >
+                                    {item.source_position_id}
+                                  </button>
+                                </p>
+                                {item.clinical_context ? (
+                                  <p className="mt-1 text-xs leading-5 text-slate-600">{item.clinical_context}</p>
+                                ) : null}
+                              </div>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${item.priority === 'critical' ? 'border-red-200 bg-red-50 text-red-700' : item.priority === 'high' ? 'border-amber-200 bg-amber-50 text-amber-700' : item.priority === 'medium' ? 'border-yellow-200 bg-yellow-50 text-yellow-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                {item.priority}
+                              </span>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Custom Question</p>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={newQuestionCategory}
+                          onChange={(event) => onNewQuestionCategoryChange(event.target.value as QuestionCategory)}
+                          className="w-[140px] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-clinical-header"
+                        >
+                          <option value="Social">Social</option>
+                          <option value="Care Gaps">Care Gaps</option>
+                          <option value="Labs">Labs</option>
+                          <option value="Medication">Medication</option>
+                          <option value="Prior Auth">Prior Auth</option>
+                          <option value="Utilization">Utilization</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={newQuestionText}
+                          onChange={(event) => onNewQuestionTextChange(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              onAddCustomQuestion()
+                            }
+                          }}
+                          placeholder="Type a custom question for this patient"
+                          className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
+                        />
+                        <button
+                          onClick={onAddCustomQuestion}
+                          className="rounded-md bg-clinical-header px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {visibleQuestions.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+                          All questions are currently skipped. Return to Ticket Queue and choose another member.
+                        </div>
+                      ) : (
+                        visibleQuestions.map((question) => (
+                          <article
+                            key={question.id}
+                            onDragOver={(event) => {
+                              event.preventDefault()
+                              onDragOver(question.id)
+                            }}
+                            onDrop={() => onDrop(question.id)}
+                            className={`group rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]} ${
+                              draggingQuestionId === question.id ? 'opacity-50' : ''
+                            } ${dragOverQuestionId === question.id ? 'ring-2 ring-clinical-header/40' : ''}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <button
+                                type="button"
+                                draggable
+                                onDragStart={(event) => {
+                                  onDragStart(question.id)
+                                  event.dataTransfer.effectAllowed = 'move'
+                                }}
+                                onDragEnd={onDragEnd}
+                                className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+                                title="Drag from handle to reorder"
+                                aria-label="Drag handle"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                                  <circle cx="4" cy="3" r="1" />
+                                  <circle cx="10" cy="3" r="1" />
+                                  <circle cx="4" cy="7" r="1" />
+                                  <circle cx="10" cy="7" r="1" />
+                                  <circle cx="4" cy="11" r="1" />
+                                  <circle cx="10" cy="11" r="1" />
+                                </svg>
+                              </button>
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4"
+                                checked={questionStateForMember[question.id]?.checked ?? false}
+                                onChange={(event) => onQuestionStateChange(question.id, { checked: event.target.checked })}
+                              />
+                              <div className="flex-1">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
+                                <p className="mt-1 text-sm text-slate-800">{question.text}</p>
+                              </div>
+                              <button
+                                onClick={() => onSkipQuestion(question.id)}
+                                className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
+                              >
+                                Skip
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
-              {visibleQuestions.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
-                  All questions are currently skipped. Return to Ticket Queue and choose another member or continue to Begin Call.
-                </div>
-              ) : (
-                visibleQuestions.map((question) => (
-                  <article
-                    key={question.id}
-                    onDragOver={(event) => {
-                      event.preventDefault()
-                      onDragOver(question.id)
-                    }}
-                    onDrop={() => onDrop(question.id)}
-                    className={`group rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]} ${
-                      draggingQuestionId === question.id ? 'opacity-50' : ''
-                    } ${dragOverQuestionId === question.id ? 'ring-2 ring-clinical-header/40' : ''}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={(event) => {
-                          onDragStart(question.id)
-                          event.dataTransfer.effectAllowed = 'move'
-                        }}
-                        onDragEnd={onDragEnd}
-                        className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
-                        title="Drag from handle to reorder"
-                        aria-label="Drag handle"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-                          <circle cx="4" cy="3" r="1" />
-                          <circle cx="10" cy="3" r="1" />
-                          <circle cx="4" cy="7" r="1" />
-                          <circle cx="10" cy="7" r="1" />
-                          <circle cx="4" cy="11" r="1" />
-                          <circle cx="10" cy="11" r="1" />
-                        </svg>
-                      </button>
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4"
-                        checked={questionStateForMember[question.id]?.checked ?? false}
-                        onChange={(event) => onQuestionStateChange(question.id, { checked: event.target.checked })}
-                      />
-                      <div className="flex-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
-                        <p className="mt-1 text-sm text-slate-800">{question.text}</p>
-                      </div>
-                      <button
-                        onClick={() => onSkipQuestion(question.id)}
-                        className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
-                      >
-                        Skip
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-
-            <div className="mt-4 border-t border-slate-200 pt-4 text-right">
-              <button
-                onClick={onBeginCall}
-                className="rounded-md bg-clinical-header px-6 py-3 text-base font-semibold text-white transition hover:brightness-110"
-              >
-                Begin Call {'->'}
-              </button>
-            </div>
           </div>
         </>
       )}

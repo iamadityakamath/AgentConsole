@@ -32,7 +32,6 @@ interface OverviewPageProps {
   draggingQuestionId: string | null
   dragOverQuestionId: string | null
   onQuestionStateChange: (questionId: string, patch: Partial<QuestionUIState>) => void
-  onBeginCall: () => void
   onNewQuestionTextChange: (value: string) => void
   onNewQuestionCategoryChange: (category: QuestionCategory) => void
   onAddCustomQuestion: () => void
