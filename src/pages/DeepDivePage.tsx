@@ -2,9 +2,13 @@ import type { CareGap, EhrNote, InsuranceClaim, LabResult, Medication, MemberPro
 import type { SuggestedQuestion } from '../types/questions'
 import type { DeepDiveQuestionResponse, DeepDiveSectionId } from '../types/callWorkflow'
 import { DeepDiveView } from '../components/DashboardViews'
+import type { PatientDetailApiRecord } from '../services/dashboardApi'
 
 interface DeepDivePageProps {
   selectedMember: MemberProfile | null
+  selectedPatientDetail: PatientDetailApiRecord | null
+  patientDetailLoading: boolean
+  patientDetailError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]

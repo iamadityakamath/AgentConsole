@@ -14,7 +14,6 @@ import type { SuggestedQuestion } from '../types/questions'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
 import {
   deepDiveSections,
-  deepDiveStatusStyles,
   type CarePlanDraft,
   type DeepDiveQuestionResponse,
   type DeepDiveSectionId,
@@ -295,6 +294,17 @@ interface AiSuggestionsResponse {
   }>
 }
 
+interface StoredView2Data {
+  memberId: string
+  member: MemberProfile | null
+  patientDetail: PatientDetailApiRecord | null
+  notes: EhrNote[]
+  labs: LabResult[]
+  meds: Medication[]
+  gaps: CareGap[]
+  auths: PriorAuthorization[]
+}
+
 function parseJsonString(value: string): unknown | null {
   try {
     return JSON.parse(value)
@@ -471,6 +481,7 @@ export function OverviewView({
   const [manualQuestions, setManualQuestions] = useState<AiCoordinatorQuestion[]>([])
   const [hiddenQuestionIds, setHiddenQuestionIds] = useState<string[]>([])
   const [questionTextEdits, setQuestionTextEdits] = useState<Record<string, string>>({})
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
   const [newQuestionText, setNewQuestionText] = useState('')
   const [newQuestionCategory, setNewQuestionCategory] = useState('Social')
   const [apiQuestionOrder, setApiQuestionOrder] = useState<string[]>([])
@@ -478,6 +489,7 @@ export function OverviewView({
   const [dragOverApiQuestionId, setDragOverApiQuestionId] = useState<string | null>(null)
 
   const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
+  const selectedMemberId = selectedMember?.member_id ?? selectedTicket?.memberId ?? ''
 
   const combinedQuestions = useMemo(() => {
     const questions = [...manualQuestions, ...(aiSuggestionsData?.coordinator_questions ?? [])]
@@ -512,6 +524,51 @@ export function OverviewView({
       return a.question_id.localeCompare(b.question_id)
     })
   }, [combinedQuestions, apiQuestionOrder])
+
+  useEffect(() => {
+    const ids = orderedApiQuestions.map((question) => question.question_id)
+    if (ids.length === 0) {
+      setSelectedQuestionIds([])
+      return
+    }
+
+    setSelectedQuestionIds((current) => {
+      const retained = current.filter((id) => ids.includes(id))
+      const additions = ids.filter((id) => !retained.includes(id))
+      return [...retained, ...additions]
+    })
+  }, [orderedApiQuestions])
+
+  useEffect(() => {
+    if (!selectedMemberId) return
+
+    const selectedForDeepDive = orderedApiQuestions
+      .filter((question) => selectedQuestionIds.includes(question.question_id))
+      .map((question) => ({
+        id: question.question_id,
+        category: (question.category as SuggestedQuestion['category']) ?? 'Social',
+        text: questionTextEdits[question.question_id] ?? question.question_text,
+      }))
+
+    window.localStorage.setItem(`deep-dive-selected-questions:${selectedMemberId}`, JSON.stringify(selectedForDeepDive))
+  }, [orderedApiQuestions, selectedQuestionIds, questionTextEdits, selectedMemberId])
+
+  useEffect(() => {
+    if (!selectedMemberId) return
+
+    const snapshot: StoredView2Data = {
+      memberId: selectedMemberId,
+      member: selectedMember ?? null,
+      patientDetail: selectedPatientDetail ?? null,
+      notes: selectedNotes,
+      labs: selectedLabs,
+      meds: selectedMeds,
+      gaps: selectedGaps,
+      auths: selectedAuths,
+    }
+
+    window.localStorage.setItem(`view2-panel-data:${selectedMemberId}`, JSON.stringify(snapshot))
+  }, [selectedMemberId, selectedMember, selectedNotes, selectedLabs, selectedMeds, selectedGaps, selectedAuths])
 
   function addManualQuestion() {
     const text = newQuestionText.trim()
@@ -554,6 +611,7 @@ export function OverviewView({
       const { [questionId]: _removed, ...remaining } = current
       return remaining
     })
+    setSelectedQuestionIds((current) => current.filter((id) => id !== questionId))
   }
 
   function reorderApiQuestions(fromId: string, toId: string) {
@@ -931,7 +989,7 @@ export function OverviewView({
               </div>
             </aside>
 
-            <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
               {activePanel === 'demographics' ? (
                 <>
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Patient Demographics</h3>
@@ -1826,6 +1884,19 @@ export function OverviewView({
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
                                     <div className="flex flex-wrap items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedQuestionIds.includes(item.question_id)}
+                                        onChange={(event) => {
+                                          setSelectedQuestionIds((current) => (
+                                            event.target.checked
+                                              ? [...current, item.question_id]
+                                              : current.filter((id) => id !== item.question_id)
+                                          ))
+                                        }}
+                                        className="h-4 w-4"
+                                        title="Include this question in View 3"
+                                      />
                                       <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                                         {formatQuestionCategory(item.category)}
                                       </span>
@@ -1934,6 +2005,9 @@ export function OverviewView({
 
 interface DeepDiveViewProps {
   selectedMember: MemberProfile | null
+  selectedPatientDetail: PatientDetailApiRecord | null
+  patientDetailLoading: boolean
+  patientDetailError: string
   selectedNotes: EhrNote[]
   selectedLabs: LabResult[]
   selectedMeds: Medication[]
@@ -1958,88 +2032,222 @@ interface DeepDiveViewProps {
   supervisorNotes: string[]
   onSetActiveSection: (sectionId: DeepDiveSectionId) => void
   onUpdateQuestion: (sectionId: DeepDiveSectionId, questionId: string, patch: Partial<DeepDiveQuestionResponse>) => void
-  onFlagForSupervisor: () => void
-  onCompleteCall: () => void
   getSectionProgress: (sectionId: DeepDiveSectionId) => { total: number; completed: number; allComplete: boolean }
 }
 
 export function DeepDiveView({
   selectedMember,
+  selectedPatientDetail,
+  patientDetailLoading,
+  patientDetailError,
   selectedNotes,
   selectedLabs,
   selectedMeds,
   selectedGaps,
   selectedAuths,
-  selectedClaims,
   selectedPharmacyClaims,
-  activeDeepDiveSection,
-  sectionQuestions,
-  deepDiveResponses,
   supervisorNotes,
-  onSetActiveSection,
-  onUpdateQuestion,
-  onFlagForSupervisor,
-  onCompleteCall,
-  getSectionProgress,
 }: DeepDiveViewProps) {
-  function renderQuestionCard(sectionId: DeepDiveSectionId, question: SuggestedQuestion) {
-    const response = deepDiveResponses[sectionId]?.[question.id] ?? { notes: '', status: '' }
+  const [activeDataPanel, setActiveDataPanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
+  const [selectedQuestions, setSelectedQuestions] = useState<SuggestedQuestion[]>([])
+  const [storedView2Data, setStoredView2Data] = useState<StoredView2Data | null>(null)
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({})
 
-    return (
-      <article key={question.id} className={`rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]}`}>
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
-            <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
-            <label className="mt-3 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Coordinator Notes
-              <textarea
-                value={response.notes}
-                onChange={(event) => onUpdateQuestion(sectionId, question.id, { notes: event.target.value })}
-                rows={4}
-                placeholder="Capture what the patient said, barriers, and next steps"
-                className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-clinical-header"
-              />
-            </label>
+  const routeMemberId = (() => {
+    const match = /^\/deep-dive\/([^/]+)$/.exec(window.location.pathname)
+    return match?.[1] ? decodeURIComponent(match[1]) : ''
+  })()
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(['Patient Answered', 'Skipped', 'Needs Follow-Up'] as const).map((status) => (
-                <button
-                  key={status}
-                  onClick={() => onUpdateQuestion(sectionId, question.id, { status })}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    response.status === status ? deepDiveStatusStyles[status] : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
+  const effectiveMember = selectedMember ?? storedView2Data?.member ?? null
+  const effectivePatientDetail = selectedPatientDetail ?? storedView2Data?.patientDetail ?? null
+  const effectiveNotes = selectedNotes.length > 0 ? selectedNotes : (storedView2Data?.notes ?? [])
+  const effectiveLabs = selectedLabs.length > 0 ? selectedLabs : (storedView2Data?.labs ?? [])
+  const effectiveMeds = selectedMeds.length > 0 ? selectedMeds : (storedView2Data?.meds ?? [])
+  const effectiveGaps = selectedGaps.length > 0 ? selectedGaps : (storedView2Data?.gaps ?? [])
+  const effectiveAuths = selectedAuths.length > 0 ? selectedAuths : (storedView2Data?.auths ?? [])
+
+  const demographicsSections = effectivePatientDetail
+    ? [
+      {
+        title: 'Identity',
+        rows: [
+          { label: 'Member ID', value: effectivePatientDetail.member_id },
+          { label: 'Gender', value: effectivePatientDetail.gender },
+          { label: 'Age', value: String(effectivePatientDetail.age) },
+          { label: 'Date of Birth', value: effectivePatientDetail.date_of_birth ?? 'N/A' },
+          { label: 'Preferred Language', value: effectivePatientDetail.preferred_language ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Address',
+        rows: [
+          { label: 'Street Address', value: effectivePatientDetail.street_address ?? 'N/A' },
+          { label: 'City', value: effectivePatientDetail.city ?? 'N/A' },
+          { label: 'State', value: effectivePatientDetail.state ?? 'N/A' },
+          { label: 'Zip Code', value: effectivePatientDetail.zip_code == null ? 'N/A' : String(effectivePatientDetail.zip_code) },
+          { label: 'Location', value: effectivePatientDetail.location },
+        ],
+      },
+      {
+        title: 'Contact',
+        rows: [
+          { label: 'Phone Primary', value: effectivePatientDetail.phone_primary ?? 'N/A' },
+          { label: 'Phone Secondary', value: effectivePatientDetail.phone_secondary ?? 'N/A' },
+          { label: 'Preferred Contact Method', value: effectivePatientDetail.preferred_contact_method ?? 'N/A' },
+          { label: 'Email Address', value: effectivePatientDetail.email_address ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Social Profile',
+        rows: [
+          { label: 'Marital Status', value: effectivePatientDetail.marital_status ?? 'N/A' },
+          { label: 'Employment Status', value: effectivePatientDetail.employment_status ?? 'N/A' },
+          { label: 'Caregiver Support', value: effectivePatientDetail.caregiver_support ?? 'N/A' },
+        ],
+      },
+      {
+        title: 'Clinical and Coverage',
+        rows: [
+          { label: 'Primary Conditions', value: effectivePatientDetail.primary_conditions ?? 'N/A' },
+          { label: 'Insurance Plan Type', value: effectivePatientDetail.insurance_plan_type ?? 'N/A' },
+          { label: 'Insurance Start Date', value: effectivePatientDetail.insurance_start_date ?? 'N/A' },
+          { label: 'Risk Tier', value: effectivePatientDetail.risk_tier ?? 'N/A' },
+          { label: 'Assigned Coordinator', value: effectivePatientDetail.assigned_coordinator ?? 'N/A' },
+        ],
+      },
+    ]
+    : []
+
+  useEffect(() => {
+    const memberId = selectedMember?.member_id || routeMemberId
+    if (!memberId) {
+      setSelectedQuestions([])
+      return
+    }
+
+    const raw = window.localStorage.getItem(`deep-dive-selected-questions:${memberId}`)
+    if (!raw) {
+      setSelectedQuestions([])
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as SuggestedQuestion[]
+      setSelectedQuestions(Array.isArray(parsed) ? parsed : [])
+    } catch {
+      setSelectedQuestions([])
+    }
+  }, [selectedMember?.member_id, routeMemberId])
+
+  useEffect(() => {
+    if (selectedMember) {
+      setStoredView2Data(null)
+      return
+    }
+
+    if (!routeMemberId) return
+
+    const raw = window.localStorage.getItem(`view2-panel-data:${routeMemberId}`)
+    if (!raw) {
+      setStoredView2Data(null)
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as StoredView2Data
+      setStoredView2Data(parsed)
+    } catch {
+      setStoredView2Data(null)
+    }
+  }, [selectedMember, routeMemberId])
+
+  function renderLeftPanel(panelId: 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes') {
+    switch (panelId) {
+      case 'demographics':
+        return (
+          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Patient Demographics</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Same demographic panel as View 2.
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
+              {patientDetailLoading ? (
+                <p className="mt-2 text-sm text-slate-600">Loading patient details...</p>
+              ) : null}
+              {!patientDetailLoading && patientDetailError ? (
+                <p className="mt-2 text-sm text-red-700">{patientDetailError}</p>
+              ) : null}
+              {!patientDetailLoading && !patientDetailError && effectivePatientDetail ? (
+                <div className="mt-3 space-y-3">
+                  <div className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/70 shadow-[0_1px_20px_rgba(15,23,42,0.06)]">
+                    <div className="border-b border-slate-200/80 px-5 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Patient Snapshot</p>
+                          <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{effectivePatientDetail.full_name}</p>
+                          <p className="mt-1 text-sm text-slate-600">Member ID {effectivePatientDetail.member_id}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                          <span className="inline-flex rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+                            {effectivePatientDetail.age} · {effectivePatientDetail.gender}
+                          </span>
+                          <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 shadow-sm">
+                            {effectivePatientDetail.risk_tier ?? 'N/A'}
+                          </span>
+                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 shadow-sm">
+                            {effectivePatientDetail.preferred_contact_method ?? 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {demographicsSections.map((section) => (
+                      <section key={section.title} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section.title}</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-px bg-slate-100 md:grid-cols-2 xl:grid-cols-3">
+                          {section.rows.map((row) => (
+                            <div
+                              key={row.label}
+                              className={`bg-white px-4 py-3 transition-colors hover:bg-slate-50/80 ${section.title === 'Contact' && row.label === 'Email Address' ? 'md:col-span-2 xl:col-span-3' : ''}`}
+                            >
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{row.label}</p>
+                              <p className="mt-1 min-w-0 break-words text-sm leading-6 text-slate-900">{row.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-        </div>
-      </article>
-    )
-  }
+        )
 
-  function renderLeftPanel(sectionId: DeepDiveSectionId) {
-    switch (sectionId) {
-      case 'clinical':
+      case 'notes':
         return (
           <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Clinical Notes & History</h3>
               <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {selectedNotes.length} note{selectedNotes.length === 1 ? '' : 's'} on file. The most recent note is expanded by default.
+                {effectiveMember?.patient_name ?? 'This patient'} has {effectiveNotes.length} note{effectiveNotes.length === 1 ? '' : 's'} on file. The most recent note is expanded by default.
               </p>
             </div>
 
-            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
-              {selectedNotes.length === 0 ? (
+            <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+              {effectiveNotes.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">
                   No clinical notes on file for this patient.
                 </div>
               ) : (
-                selectedNotes.map((note, index) => (
+                effectiveNotes.map((note, index) => (
                   <details key={note.note_id} open={index === 0} className="rounded-lg border border-slate-200 bg-white p-3">
                     <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2074,25 +2282,25 @@ export function DeepDiveView({
         )
 
       case 'labs': {
-        const groupedLabs = selectedLabs.reduce<Record<string, typeof selectedLabs>>((acc, lab) => {
+        const groupedLabs = effectiveLabs.reduce<Record<string, typeof effectiveLabs>>((acc, lab) => {
           const list = acc[lab.lab_type] ?? []
           list.push(lab)
           acc[lab.lab_type] = list
           return acc
         }, {})
         const groupNames = Object.keys(groupedLabs)
-        const abnormalCount = selectedLabs.filter((lab) => lab.result_flag !== 'Normal').length
+        const abnormalCount = effectiveLabs.filter((lab) => lab.result_flag !== 'Normal').length
 
         return (
           <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Lab Results</h3>
               <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {selectedLabs.length} lab result{selectedLabs.length === 1 ? '' : 's'} across {groupNames.length} lab type{groupNames.length === 1 ? '' : 's'}. {abnormalCount} are abnormal.
+                {effectiveMember?.patient_name ?? 'This patient'} has {effectiveLabs.length} lab result{effectiveLabs.length === 1 ? '' : 's'} across {groupNames.length} lab type{groupNames.length === 1 ? '' : 's'}. {abnormalCount} are abnormal.
               </p>
             </div>
-            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
-              {selectedLabs.length === 0 ? (
+            <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+              {effectiveLabs.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No lab results on file for this patient.</div>
               ) : (
                 groupNames.map((labType, index) => (
@@ -2135,19 +2343,19 @@ export function DeepDiveView({
       }
 
       case 'medications': {
-        const activeMedications = selectedMeds.filter((medication) => medication.medication_status === 'Active')
-        const nonAdherentCount = selectedMeds.filter((medication) => medication.adherence_status === 'Non-Adherent').length
-        const onHoldCount = selectedMeds.filter((medication) => medication.adherence_status === 'On Hold').length
+        const activeMedications = effectiveMeds.filter((medication) => medication.medication_status === 'Active')
+        const nonAdherentCount = effectiveMeds.filter((medication) => medication.adherence_status === 'Non-Adherent').length
+        const onHoldCount = effectiveMeds.filter((medication) => medication.adherence_status === 'On Hold').length
 
         return (
           <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Medications</h3>
               <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {activeMedications.length} active medication{activeMedications.length === 1 ? '' : 's'}. {nonAdherentCount} are Non-Adherent and {onHoldCount} are On Hold.
+                {effectiveMember?.patient_name ?? 'This patient'} has {activeMedications.length} active medication{activeMedications.length === 1 ? '' : 's'}. {nonAdherentCount} are Non-Adherent and {onHoldCount} are On Hold.
               </p>
             </div>
-            <div className="max-h-[640px] flex-1 space-y-3 overflow-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
               <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
                 <table className="w-full text-left text-sm">
                   <thead>
@@ -2164,7 +2372,7 @@ export function DeepDiveView({
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedMeds.map((medication, index) => (
+                    {effectiveMeds.map((medication, index) => (
                       <tr key={medication.med_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${medication.adherence_status === 'Non-Adherent' ? 'bg-red-50' : ''}`}>
                         <td className="px-1 py-1.5">{medication.drug_name}</td>
                         <td className="px-1 py-1.5">{medication.brand_name}</td>
@@ -2231,12 +2439,12 @@ export function DeepDiveView({
             <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Care Gaps</h3>
               <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {selectedGaps.length} care gap{selectedGaps.length === 1 ? '' : 's'} on file. Open critical gaps are highlighted first.
+                {effectiveMember?.patient_name ?? 'This patient'} has {effectiveGaps.length} care gap{effectiveGaps.length === 1 ? '' : 's'} on file. Open critical gaps are highlighted first.
               </p>
             </div>
 
-            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
-              {selectedGaps.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-auto pr-1">
+              {effectiveGaps.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No care gaps on file for this patient.</div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
@@ -2253,7 +2461,7 @@ export function DeepDiveView({
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedGaps.map((gap, index) => (
+                      {effectiveGaps.map((gap, index) => (
                         <tr key={gap.gap_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${gap.priority === 'Critical' ? 'bg-red-50' : gap.priority === 'High' ? 'bg-amber-50' : ''}`}>
                           <td className="px-1 py-1.5">{gap.gap_category}</td>
                           <td className="px-1 py-1.5">{gap.gap_description}</td>
@@ -2278,11 +2486,11 @@ export function DeepDiveView({
             <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Prior Authorizations</h3>
               <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {selectedAuths.length} prior authorization{selectedAuths.length === 1 ? '' : 's'} on file.
+                {effectiveMember?.patient_name ?? 'This patient'} has {effectiveAuths.length} prior authorization{effectiveAuths.length === 1 ? '' : 's'} on file.
               </p>
             </div>
-            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
-              {selectedAuths.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-auto pr-1">
+              {effectiveAuths.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No prior authorizations on file for this patient.</div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
@@ -2299,7 +2507,7 @@ export function DeepDiveView({
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedAuths.map((auth, index) => (
+                      {effectiveAuths.map((auth, index) => (
                         <tr key={auth.auth_id} className={index % 2 === 1 ? 'bg-clinical-row' : ''}>
                           <td className="px-1 py-1.5">{auth.auth_type}</td>
                           <td className="px-1 py-1.5">{auth.service_requested}</td>
@@ -2318,88 +2526,38 @@ export function DeepDiveView({
           </div>
         )
 
-      case 'claims': {
-        const erVisits = selectedClaims.filter((claim) => claim.place_of_service === 'Emergency Room').length
-        const inpatientStays = selectedClaims.filter((claim) => claim.place_of_service === 'Inpatient Hospital').length
-        const totalBilled = selectedClaims.reduce((sum, claim) => sum + claim.billed_amount, 0)
-
-        return (
-          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Claims & Utilization</h3>
-              <p className="mt-1 text-sm text-slate-600">
-                {selectedMember?.patient_name ?? 'This patient'} has {selectedClaims.length} insurance claim{selectedClaims.length === 1 ? '' : 's'} on file.
-              </p>
-            </div>
-
-            <div className="mb-3 grid grid-cols-4 gap-3">
-              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Total Claims</p><p className="mt-1 text-xl font-semibold text-slate-900">{selectedClaims.length}</p></div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">ER Visits</p><p className="mt-1 text-xl font-semibold text-red-700">{erVisits}</p></div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Inpatient Stays</p><p className="mt-1 text-xl font-semibold text-amber-700">{inpatientStays}</p></div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs uppercase tracking-wide text-slate-500">Total Billed</p><p className="mt-1 text-xl font-semibold text-slate-900">{formatMoney(totalBilled)}</p></div>
-            </div>
-
-            <div className="max-h-[640px] flex-1 overflow-auto pr-1">
-              {selectedClaims.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600">No claims on file for this patient.</div>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="text-xs text-slate-500">
-                        <th className="py-1 font-medium">Date</th>
-                        <th className="py-1 font-medium">Claim Type</th>
-                        <th className="py-1 font-medium">Place of Service</th>
-                        <th className="py-1 font-medium">Provider</th>
-                        <th className="py-1 font-medium">Facility</th>
-                        <th className="py-1 font-medium">Diagnosis</th>
-                        <th className="py-1 font-medium">Billed Amount</th>
-                        <th className="py-1 font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedClaims.map((claim, index) => (
-                        <tr key={claim.claim_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${claim.place_of_service === 'Emergency Room' ? 'bg-red-50' : claim.place_of_service === 'Inpatient Hospital' ? 'bg-amber-50' : ''}`}>
-                          <td className="px-1 py-1.5">{formatDate(claim.date_of_service)}</td>
-                          <td className="px-1 py-1.5">{claim.claim_type}</td>
-                          <td className="px-1 py-1.5">{claim.place_of_service}</td>
-                          <td className="px-1 py-1.5">{claim.provider_name}</td>
-                          <td className="px-1 py-1.5">{claim.facility_name}</td>
-                          <td className="px-1 py-1.5">{claim.diagnosis_description}</td>
-                          <td className="px-1 py-1.5">{formatMoney(claim.billed_amount)}</td>
-                          <td className="px-1 py-1.5">{claim.claim_status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )
-      }
+      default:
+        return null
     }
   }
 
-  function renderRightPanel(sectionId: DeepDiveSectionId) {
-    const questions = sectionQuestions[sectionId]
-    const progress = getSectionProgress(sectionId)
-
+  function renderRightPanel() {
     return (
       <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">Questions & Answers</h3>
-            <p className="text-sm text-slate-500">{formatSectionQuestionCount(progress.completed, progress.total)}</p>
+            <h3 className="text-lg font-semibold text-slate-800">Questions</h3>
+            <p className="text-sm text-slate-500">{selectedQuestions.length} questions</p>
           </div>
-          {progress.allComplete ? <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">All answered</span> : null}
         </div>
 
-        <div className="max-h-[640px] flex-1 space-y-2 overflow-auto pr-1">
-          {questions.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">No questions available for this section.</div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+          {selectedQuestions.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">No questions selected. Go back to View 2 to select questions.</div>
           ) : (
-            questions.map((question) => renderQuestionCard(sectionId, question))
+            selectedQuestions.map((question) => (
+              <article key={question.id} className={`rounded-lg border-l-4 border border-slate-200 bg-white p-4 shadow-sm ${categoryBorderStyles[question.category]}`}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
+                <textarea
+                  placeholder="Write your answer here..."
+                  value={questionAnswers[question.id] || ''}
+                  onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
+                  rows={3}
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder-slate-400 transition focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300"
+                />
+              </article>
+            ))
           )}
         </div>
       </div>
@@ -2407,17 +2565,13 @@ export function DeepDiveView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
       <div className="flex items-center justify-between rounded-xl bg-slate-900 px-5 py-4 text-white">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">Current Patient</p>
           <h2 className="mt-1 text-lg font-semibold">
-            {selectedMember?.patient_name ?? 'No patient selected'} <span className="text-sm font-normal text-slate-300">{selectedMember?.member_id ?? ''}</span>
+            {effectiveMember?.patient_name ?? 'No patient selected'} <span className="text-sm font-normal text-slate-300">{effectiveMember?.member_id ?? ''}</span>
           </h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onFlagForSupervisor} className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/20">Flag for Supervisor</button>
-          <button onClick={onCompleteCall} className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400">Complete Call</button>
         </div>
       </div>
 
@@ -2430,22 +2584,27 @@ export function DeepDiveView({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-4">
-        <aside className="sticky top-4 h-fit rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] gap-4 overflow-hidden">
+        <aside className="sticky top-4 max-h-full overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="mb-3 border-b border-slate-200 pb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Section Navigator</h3>
-            <p className="mt-1 text-sm text-slate-600">Jump freely between sections.</p>
+            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Sections</h3>
+            <p className="mt-1 text-sm text-slate-600">Same data panel navigation as View 2.</p>
           </div>
           <div className="space-y-2">
-            {deepDiveSections.map((section) => {
-              const progress = getSectionProgress(section.id)
-              const isActive = activeDeepDiveSection === section.id
+            {[
+              { id: 'demographics', label: 'Patient Demographics' },
+              { id: 'gaps', label: 'Care Gap Reports' },
+              { id: 'labs', label: 'Lab Results' },
+              { id: 'medications', label: 'Medication List' },
+              { id: 'auths', label: 'Prior Auth History' },
+              { id: 'notes', label: 'EHR Clinical Notes' },
+            ].map((section) => {
+              const isActive = activeDataPanel === section.id
               return (
-                <button key={section.id} onClick={() => onSetActiveSection(section.id)} className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${isActive ? 'border-clinical-header bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
-                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${progress.allComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{progress.allComplete ? '✓' : section.icon}</span>
+                <button key={section.id} onClick={() => setActiveDataPanel(section.id as 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes')} className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${isActive ? 'border-clinical-header bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">•</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-slate-800">{section.label}</span>
-                    <span className="block text-xs text-slate-500">{formatSectionQuestionCount(progress.completed, progress.total)}</span>
                   </span>
                 </button>
               )
@@ -2453,9 +2612,13 @@ export function DeepDiveView({
           </div>
         </aside>
 
-        <div className="grid min-h-[680px] grid-cols-[55%_45%] gap-4">
-          {renderLeftPanel(activeDeepDiveSection)}
-          {renderRightPanel(activeDeepDiveSection)}
+        <div className="flex h-full min-h-0 gap-4 overflow-hidden">
+          <div className="min-h-0 w-[55%] overflow-y-auto">
+            {renderLeftPanel(activeDataPanel)}
+          </div>
+          <div className="min-h-0 w-[45%] overflow-y-auto">
+            {renderRightPanel()}
+          </div>
         </div>
       </div>
     </div>

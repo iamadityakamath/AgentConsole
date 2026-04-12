@@ -609,6 +609,9 @@ function App() {
               <Route path="/deep-dive/:memberId" element={(
                 <DeepDivePage
                 selectedMember={selectedMember}
+                selectedPatientDetail={selectedPatientDetail}
+                patientDetailLoading={selectedPatientDetailLoading}
+                patientDetailError={selectedPatientDetailError}
                 selectedNotes={selectedNotes}
                 selectedLabs={selectedLabs}
                 selectedMeds={selectedMeds}
