@@ -5,6 +5,9 @@ export interface SuggestedQuestion {
   category: QuestionCategory
   text: string
   isCritical?: boolean
+  sourcePositionId?: string
+  sourceType?: string
+  sourceLabel?: string
 }
 
 export interface QuestionUIState {

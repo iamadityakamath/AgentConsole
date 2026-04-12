@@ -548,6 +548,9 @@ export function OverviewView({
         id: question.question_id,
         category: (question.category as SuggestedQuestion['category']) ?? 'Social',
         text: questionTextEdits[question.question_id] ?? question.question_text,
+        sourcePositionId: question.source_position_id,
+        sourceType: question.source_type,
+        sourceLabel: question.source_label,
       }))
 
     window.localStorage.setItem(`deep-dive-selected-questions:${selectedMemberId}`, JSON.stringify(selectedForDeepDive))
@@ -2054,6 +2057,7 @@ export function DeepDiveView({
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({})
   const [showNoteInput, setShowNoteInput] = useState<boolean>(false)
   const [callNotes, setCallNotes] = useState<string>('')
+  const [activeSourcePositionId, setActiveSourcePositionId] = useState<string | null>(null)
 
   const routeMemberId = (() => {
     const match = /^\/deep-dive\/([^/]+)$/.exec(window.location.pathname)
@@ -2163,6 +2167,43 @@ export function DeepDiveView({
     }
   }, [selectedMember, routeMemberId])
 
+  function mapCategoryToPanel(category: string): 'gaps' | 'labs' | 'medications' | 'auths' | 'notes' {
+    const normalized = category.toLowerCase()
+    if (normalized.includes('lab')) return 'labs'
+    if (normalized.includes('med')) return 'medications'
+    if (normalized.includes('auth')) return 'auths'
+    if (normalized.includes('gap')) return 'gaps'
+    return 'notes'
+  }
+
+  function focusSourceInDeepDive(sourcePositionId?: string, fallbackCategory?: string) {
+    const sourceMatch = sourcePositionId ? /^(gap|lab|med|auth|note)-section-(\d+)$/.exec(sourcePositionId) : null
+    const sourceType = sourceMatch?.[1]
+
+    const targetPanel =
+      sourceType === 'gap' ? 'gaps'
+      : sourceType === 'lab' ? 'labs'
+      : sourceType === 'med' ? 'medications'
+      : sourceType === 'auth' ? 'auths'
+      : sourceType === 'note' ? 'notes'
+      : mapCategoryToPanel(fallbackCategory ?? '')
+
+    setActiveDataPanel(targetPanel)
+
+    if (!sourcePositionId) {
+      setActiveSourcePositionId(null)
+      return
+    }
+
+    setActiveSourcePositionId(sourcePositionId)
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(sourcePositionId)
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  }
+
   function renderLeftPanel(panelId: 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes') {
     switch (panelId) {
       case 'demographics':
@@ -2249,8 +2290,12 @@ export function DeepDiveView({
                   No clinical notes on file for this patient.
                 </div>
               ) : (
-                effectiveNotes.map((note, index) => (
-                  <details key={note.note_id} open={index === 0} className="rounded-lg border border-slate-200 bg-white p-3">
+                effectiveNotes.map((note, index) => {
+                  const sourcePositionId = `note-section-${index + 1}`
+                  const isSourceActive = activeSourcePositionId === sourcePositionId
+
+                  return (
+                  <details id={sourcePositionId} key={note.note_id} open={index === 0} className={`rounded-lg border bg-white p-3 ${isSourceActive ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-200'}`}>
                     <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span>{formatDate(note.note_date)} - {note.note_type}</span>
@@ -2277,7 +2322,7 @@ export function DeepDiveView({
                       ))}
                     </div>
                   </details>
-                ))
+                )})
               )}
             </div>
           </div>
@@ -2322,8 +2367,11 @@ export function DeepDiveView({
                           </tr>
                         </thead>
                         <tbody>
-                          {groupedLabs[labType].map((lab, idx) => (
-                            <tr key={lab.lab_id} className={idx % 2 === 1 ? 'bg-clinical-row' : ''}>
+                          {groupedLabs[labType].map((lab, idx) => {
+                            const sourcePositionId = `lab-section-${effectiveLabs.findIndex((item) => item.lab_id === lab.lab_id) + 1}`
+                            const isSourceActive = activeSourcePositionId === sourcePositionId
+                            return (
+                            <tr id={sourcePositionId} key={lab.lab_id} className={`${idx % 2 === 1 ? 'bg-clinical-row' : ''} ${isSourceActive ? 'bg-blue-50 outline outline-1 outline-blue-300' : ''}`}>
                               <td className="px-1 py-1.5">{formatDate(lab.draw_date)}</td>
                               <td className="px-1 py-1.5">{lab.lab_type}</td>
                               <td className="px-1 py-1.5">{lab.test_name}</td>
@@ -2332,7 +2380,7 @@ export function DeepDiveView({
                               <td className="px-1 py-1.5">{lab.reference_range}</td>
                               <td className={`px-1 py-1.5 font-semibold ${labFlagStyles[lab.result_flag] ?? 'text-slate-700'}`}>{lab.result_flag}</td>
                             </tr>
-                          ))}
+                          )})}
                         </tbody>
                       </table>
                     </div>
@@ -2374,8 +2422,11 @@ export function DeepDiveView({
                     </tr>
                   </thead>
                   <tbody>
-                    {effectiveMeds.map((medication, index) => (
-                      <tr key={medication.med_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${medication.adherence_status === 'Non-Adherent' ? 'bg-red-50' : ''}`}>
+                    {effectiveMeds.map((medication, index) => {
+                      const sourcePositionId = `med-section-${index + 1}`
+                      const isSourceActive = activeSourcePositionId === sourcePositionId
+                      return (
+                      <tr id={sourcePositionId} key={medication.med_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${medication.adherence_status === 'Non-Adherent' ? 'bg-red-50' : ''} ${isSourceActive ? 'outline outline-1 outline-blue-300 bg-blue-50' : ''}`}>
                         <td className="px-1 py-1.5">{medication.drug_name}</td>
                         <td className="px-1 py-1.5">{medication.brand_name}</td>
                         <td className="px-1 py-1.5">{medication.dosage}</td>
@@ -2386,7 +2437,7 @@ export function DeepDiveView({
                         <td className={`px-1 py-1.5 font-semibold ${adherenceStyles[medication.adherence_status] ?? 'text-slate-700'}`}>{medication.adherence_status}</td>
                         <td className="px-1 py-1.5">{medication.rx_notes || '-'}</td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -2463,8 +2514,11 @@ export function DeepDiveView({
                       </tr>
                     </thead>
                     <tbody>
-                      {effectiveGaps.map((gap, index) => (
-                        <tr key={gap.gap_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${gap.priority === 'Critical' ? 'bg-red-50' : gap.priority === 'High' ? 'bg-amber-50' : ''}`}>
+                      {effectiveGaps.map((gap, index) => {
+                        const sourcePositionId = `gap-section-${index + 1}`
+                        const isSourceActive = activeSourcePositionId === sourcePositionId
+                        return (
+                        <tr id={sourcePositionId} key={gap.gap_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${gap.priority === 'Critical' ? 'bg-red-50' : gap.priority === 'High' ? 'bg-amber-50' : ''} ${isSourceActive ? 'outline outline-1 outline-blue-300 bg-blue-50' : ''}`}>
                           <td className="px-1 py-1.5">{gap.gap_category}</td>
                           <td className="px-1 py-1.5">{gap.gap_description}</td>
                           <td className="px-1 py-1.5"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${gapPriorityStyles[gap.priority]}`}>{gap.priority}</span></td>
@@ -2473,7 +2527,7 @@ export function DeepDiveView({
                           <td className="px-1 py-1.5">{gap.gap_status}</td>
                           <td className="px-1 py-1.5">{gap.recommended_action}</td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -2509,8 +2563,11 @@ export function DeepDiveView({
                       </tr>
                     </thead>
                     <tbody>
-                      {effectiveAuths.map((auth, index) => (
-                        <tr key={auth.auth_id} className={index % 2 === 1 ? 'bg-clinical-row' : ''}>
+                      {effectiveAuths.map((auth, index) => {
+                        const sourcePositionId = `auth-section-${index + 1}`
+                        const isSourceActive = activeSourcePositionId === sourcePositionId
+                        return (
+                        <tr id={sourcePositionId} key={auth.auth_id} className={`${index % 2 === 1 ? 'bg-clinical-row' : ''} ${isSourceActive ? 'bg-blue-50 outline outline-1 outline-blue-300' : ''}`}>
                           <td className="px-1 py-1.5">{auth.auth_type}</td>
                           <td className="px-1 py-1.5">{auth.service_requested}</td>
                           <td className={`px-1 py-1.5 font-semibold ${auth.decision === 'Denied' ? 'text-red-700' : auth.decision === 'Pending' ? 'text-amber-700' : auth.decision === 'Appealed' ? 'text-purple-700' : 'text-emerald-700'}`}>{auth.decision}</td>
@@ -2519,7 +2576,7 @@ export function DeepDiveView({
                           <td className="px-1 py-1.5">{auth.denial_reason || '-'}</td>
                           <td className="px-1 py-1.5">{auth.appeal_status || '-'}</td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -2554,7 +2611,14 @@ export function DeepDiveView({
                   <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-xs font-medium text-slate-500">Source:</span>
-                    <span className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{question.category}</span>
+                    <button
+                      type="button"
+                      onClick={() => focusSourceInDeepDive(question.sourcePositionId, question.category)}
+                      className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700 underline-offset-2 hover:bg-slate-200 hover:underline"
+                      title="Jump to source in left panel"
+                    >
+                      {question.sourceLabel ?? formatQuestionCategory(question.category)}
+                    </button>
                   </div>
                   <textarea
                     placeholder="Write your answer here..."
@@ -2640,7 +2704,10 @@ export function DeepDiveView({
             ].map((section) => {
               const isActive = activeDataPanel === section.id
               return (
-                <button key={section.id} onClick={() => setActiveDataPanel(section.id as 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes')} className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${isActive ? 'border-clinical-header bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
+                <button key={section.id} onClick={() => {
+                  setActiveSourcePositionId(null)
+                  setActiveDataPanel(section.id as 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes')
+                }} className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${isActive ? 'border-clinical-header bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">•</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-slate-800">{section.label}</span>
