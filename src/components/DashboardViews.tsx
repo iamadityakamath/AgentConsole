@@ -8,7 +8,7 @@ import type {
   PriorAuthorization,
   SeverityLevel,
 } from '../types/domain'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { TicketRow } from '../types/dashboard'
 import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
@@ -287,6 +287,231 @@ export function OverviewView({
 }: OverviewViewProps) {
   const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
   const [labFilterByDate, setLabFilterByDate] = useState<Record<string, 'All' | 'High' | 'Low'>>({})
+  const [expandedMedicationSectionId, setExpandedMedicationSectionId] = useState<string | null>(null)
+  const [expandedPriorAuthSectionId, setExpandedPriorAuthSectionId] = useState<string | null>(null)
+  const [expandedEhrNoteSectionId, setExpandedEhrNoteSectionId] = useState<string | null>(null)
+  const [aiSuggestionsLoading, setAiSuggestionsLoading] = useState(false)
+  const [aiSuggestionsError, setAiSuggestionsError] = useState('')
+
+  const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
+
+  function buildAiSuggestionsPayload() {
+    return {
+      member_id: selectedMember?.member_id ?? selectedTicket?.memberId ?? null,
+      patient_snapshot: {
+        member_id: selectedPatientDetail?.member_id ?? selectedMember?.member_id ?? null,
+        full_name: selectedPatientDetail?.full_name ?? selectedMember?.patient_name ?? selectedTicket?.patientName ?? null,
+        age: selectedPatientDetail?.age ?? selectedMember?.age ?? null,
+        gender: selectedPatientDetail?.gender ?? selectedMember?.gender ?? null,
+        date_of_birth: selectedPatientDetail?.date_of_birth ?? null,
+        location: selectedPatientDetail?.location ?? selectedMember?.location ?? null,
+        phone_primary: selectedPatientDetail?.phone_primary ?? null,
+        phone_secondary: selectedPatientDetail?.phone_secondary ?? null,
+        email_address: selectedPatientDetail?.email_address ?? null,
+        preferred_contact_method: selectedPatientDetail?.preferred_contact_method ?? selectedMember?.preferred_contact_method ?? null,
+        preferred_language: selectedPatientDetail?.preferred_language ?? selectedMember?.preferred_language ?? null,
+        marital_status: selectedPatientDetail?.marital_status ?? null,
+        employment_status: selectedPatientDetail?.employment_status ?? null,
+        caregiver_support: selectedPatientDetail?.caregiver_support ?? null,
+        primary_conditions: selectedPatientDetail?.primary_conditions ?? selectedMember?.primary_conditions ?? null,
+        insurance_plan_type: selectedPatientDetail?.insurance_plan_type ?? selectedMember?.insurance_plan_type ?? null,
+        insurance_start_date: selectedPatientDetail?.insurance_start_date ?? null,
+        risk_tier: selectedPatientDetail?.risk_tier ?? selectedMember?.risk_tier ?? null,
+        assigned_coordinator: selectedPatientDetail?.assigned_coordinator ?? selectedMember?.assigned_coordinator ?? null,
+      },
+      care_gaps: selectedGaps.map((gap, index) => ({
+        position_id: `gap-section-${index + 1}`,
+        gap_id: gap.gap_id,
+        gap_category: gap.gap_category,
+        gap_description: gap.gap_description,
+        clinical_guideline: gap.clinical_guideline,
+        last_completed_date: gap.last_completed_date,
+        days_overdue: gap.days_overdue,
+        priority: gap.priority,
+        recommended_action: gap.recommended_action,
+        gap_status: gap.gap_status,
+        assigned_to: gap.assigned_to,
+        gap_notes: gap.gap_notes,
+      })),
+      labs: selectedLabs.map((lab, index) => ({
+        position_id: `lab-section-${index + 1}`,
+        lab_id: lab.lab_id,
+        draw_date: lab.draw_date,
+        lab_type: lab.lab_type,
+        test_name: lab.test_name,
+        result_value: lab.result_value,
+        unit: lab.unit,
+        reference_range: lab.reference_range,
+        result_flag: lab.result_flag,
+        ordering_provider: lab.ordering_provider,
+        lab_facility: lab.lab_facility,
+        clinical_note: lab.clinical_note,
+      })),
+      medications: selectedMeds.map((med, index) => ({
+        position_id: `med-section-${index + 1}`,
+        med_id: med.med_id,
+        drug_name: med.drug_name,
+        brand_name: med.brand_name,
+        dosage: med.dosage,
+        route: med.route,
+        frequency: med.frequency,
+        indication: med.indication,
+        prescribing_provider: med.prescribing_provider,
+        date_prescribed: med.date_prescribed,
+        last_fill_date: med.last_fill_date,
+        days_since_last_fill: med.days_since_last_fill,
+        refill_risk: med.days_since_last_fill > 90 ? 'Overdue' : med.days_since_last_fill > 60 ? 'At Risk' : 'On Track',
+        adherence_status: med.adherence_status,
+        medication_status: med.medication_status,
+        rx_notes: med.rx_notes,
+      })),
+      prior_auths: selectedAuths.map((auth, index) => ({
+        position_id: `auth-section-${index + 1}`,
+        auth_id: auth.auth_id,
+        request_date: auth.request_date,
+        auth_type: auth.auth_type,
+        service_requested: auth.service_requested,
+        requesting_provider: auth.requesting_provider,
+        decision: auth.decision,
+        decision_date: auth.decision_date,
+        valid_from: auth.valid_from,
+        valid_through: auth.valid_through,
+        validity_status: auth.valid_through
+          ? new Date(auth.valid_through).getTime() < Date.now()
+            ? 'Expired'
+            : Math.ceil((new Date(auth.valid_through).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 30
+              ? 'Expiring Soon'
+              : 'Active Window'
+          : 'No Validity Date',
+        denial_reason: auth.denial_reason,
+        appeal_status: auth.appeal_status,
+        auth_notes: auth.auth_notes,
+      })),
+      ehr_notes: selectedNotes.map((note, index) => ({
+        position_id: `note-section-${index + 1}`,
+        note_id: note.note_id,
+        location: note.location,
+        note_date: note.note_date,
+        note_type: note.note_type,
+        provider_name: note.provider_name,
+        facility_name: note.facility_name,
+        icd_code: note.icd_code,
+        primary_diagnosis: note.primary_diagnosis,
+        subjective: note.subjective,
+        objective: note.objective,
+        assessment: note.assessment,
+        plan: note.plan,
+        follow_up_date: note.follow_up_date,
+        follow_up_status: note.follow_up_date
+          ? new Date(note.follow_up_date).getTime() < Date.now()
+            ? 'Follow-up Overdue'
+            : 'Follow-up Scheduled'
+          : 'No Follow-up Date',
+      })),
+      generated_at: new Date().toISOString(),
+      source: 'overview-left-panel',
+    }
+  }
+
+  async function handleAiSuggestionsClick() {
+    setAiSuggestionsLoading(true)
+    setAiSuggestionsError('')
+
+    try {
+      const response = await fetch(aiSuggestionsEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(buildAiSuggestionsPayload()),
+      })
+
+      if (!response.ok) {
+        throw new Error(`AI suggestions API failed with status ${response.status}`)
+      }
+
+      const responseBody = await response.json().catch(() => null)
+      console.log('AI suggestions response:', responseBody)
+    } catch (error) {
+      setAiSuggestionsError(error instanceof Error ? error.message : 'AI suggestions request failed')
+    } finally {
+      setAiSuggestionsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const applyFocusFromQuery = () => {
+      const params = new URLSearchParams(window.location.search)
+      const openPanel = params.get('openPanel')
+      const openMedicationId = params.get('openMedicationId')
+      const openMedicationIndex = Number(params.get('openMedicationIndex') ?? '')
+      const openPriorAuthId = params.get('openPriorAuthId')
+      const openPriorAuthIndex = Number(params.get('openPriorAuthIndex') ?? '')
+      const openEhrNoteId = params.get('openEhrNoteId')
+      const openEhrNoteIndex = Number(params.get('openEhrNoteIndex') ?? '')
+
+      if (openPanel === 'medications') {
+        setActivePanel('medications')
+      } else if (openPanel === 'auths') {
+        setActivePanel('auths')
+      } else if (openPanel === 'notes') {
+        setActivePanel('notes')
+      }
+
+      let medicationTargetSectionId: string | null = null
+      let priorAuthTargetSectionId: string | null = null
+      let ehrNoteTargetSectionId: string | null = null
+
+      if (openMedicationId) {
+        const medIndex = selectedMeds.findIndex((med) => med.med_id === openMedicationId)
+        if (medIndex >= 0) {
+          medicationTargetSectionId = `med-section-${medIndex + 1}`
+        }
+      } else if (!Number.isNaN(openMedicationIndex) && openMedicationIndex > 0 && openMedicationIndex <= selectedMeds.length) {
+        medicationTargetSectionId = `med-section-${openMedicationIndex}`
+      }
+
+      if (openPriorAuthId) {
+        const authIndex = selectedAuths.findIndex((auth) => auth.auth_id === openPriorAuthId)
+        if (authIndex >= 0) {
+          priorAuthTargetSectionId = `auth-section-${authIndex + 1}`
+        }
+      } else if (!Number.isNaN(openPriorAuthIndex) && openPriorAuthIndex > 0 && openPriorAuthIndex <= selectedAuths.length) {
+        priorAuthTargetSectionId = `auth-section-${openPriorAuthIndex}`
+      }
+
+      if (openEhrNoteId) {
+        const noteIndex = selectedNotes.findIndex((note) => note.note_id === openEhrNoteId)
+        if (noteIndex >= 0) {
+          ehrNoteTargetSectionId = `note-section-${noteIndex + 1}`
+        }
+      } else if (!Number.isNaN(openEhrNoteIndex) && openEhrNoteIndex > 0 && openEhrNoteIndex <= selectedNotes.length) {
+        ehrNoteTargetSectionId = `note-section-${openEhrNoteIndex}`
+      }
+
+      const targetSectionId = medicationTargetSectionId ?? priorAuthTargetSectionId ?? ehrNoteTargetSectionId
+
+      if (medicationTargetSectionId) setExpandedMedicationSectionId(medicationTargetSectionId)
+      if (priorAuthTargetSectionId) setExpandedPriorAuthSectionId(priorAuthTargetSectionId)
+      if (ehrNoteTargetSectionId) setExpandedEhrNoteSectionId(ehrNoteTargetSectionId)
+
+      if (!targetSectionId) return
+
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(targetSectionId)
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      })
+    }
+
+    applyFocusFromQuery()
+    window.addEventListener('popstate', applyFocusFromQuery)
+
+    return () => {
+      window.removeEventListener('popstate', applyFocusFromQuery)
+    }
+  }, [selectedMeds, selectedAuths, selectedNotes])
 
   const panelItems: Array<{ id: 'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'; label: string }> = [
     { id: 'demographics', label: 'Patient Demographics' },
@@ -642,7 +867,12 @@ export function OverviewView({
                     <p className="mt-2 text-sm text-slate-500">No medications on file for this patient.</p>
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
-                      {selectedMeds.map((med) => {
+                      {selectedMeds.map((med, sectionIndex) => {
+                        const sectionId = `med-section-${sectionIndex + 1}`
+                        const isOpen = expandedMedicationSectionId
+                          ? expandedMedicationSectionId === sectionId
+                          : sectionIndex === 0
+
                         const refillRisk = med.days_since_last_fill > 90
                           ? { label: 'Overdue', style: 'border-red-200 bg-red-50 text-red-700' }
                           : med.days_since_last_fill > 60
@@ -656,8 +886,14 @@ export function OverviewView({
                             : 'border-slate-200 bg-slate-100 text-slate-700'
 
                         return (
-                          <details key={med.med_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
+                          <details id={sectionId} key={med.med_id} open={isOpen} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary
+                              onClick={(event) => {
+                                event.preventDefault()
+                                setExpandedMedicationSectionId((current) => (current === sectionId ? null : sectionId))
+                              }}
+                              className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70"
+                            >
                               <div className="min-w-0">
                                 <p className="truncate text-base font-semibold text-slate-900">{truncateText(`${med.drug_name} ${med.dosage}`, 84)}</p>
                                 <p className="mt-0.5 text-xs text-slate-600">{med.brand_name} • {med.route} • {med.frequency}</p>
@@ -731,7 +967,12 @@ export function OverviewView({
                     <p className="mt-2 text-sm text-slate-500">No prior authorization history on file.</p>
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
-                      {selectedAuths.map((auth) => {
+                      {selectedAuths.map((auth, sectionIndex) => {
+                        const sectionId = `auth-section-${sectionIndex + 1}`
+                        const isOpen = expandedPriorAuthSectionId
+                          ? expandedPriorAuthSectionId === sectionId
+                          : sectionIndex === 0
+
                         const decisionStyle = auth.decision === 'Denied'
                           ? 'border-red-200 bg-red-50 text-red-700'
                           : auth.decision === 'Pending'
@@ -759,8 +1000,14 @@ export function OverviewView({
                           : 'No Validity Date'
 
                         return (
-                          <details key={auth.auth_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
+                          <details id={sectionId} key={auth.auth_id} open={isOpen} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary
+                              onClick={(event) => {
+                                event.preventDefault()
+                                setExpandedPriorAuthSectionId((current) => (current === sectionId ? null : sectionId))
+                              }}
+                              className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70"
+                            >
                               <div className="min-w-0">
                                 <p className="truncate text-base font-semibold text-slate-900">{truncateText(auth.service_requested, 84)}</p>
                                 <p className="mt-0.5 text-xs text-slate-600">{auth.auth_type} • Requested {formatDate(auth.request_date)} • Auth ID {auth.auth_id}</p>
@@ -836,7 +1083,12 @@ export function OverviewView({
                     <p className="mt-2 text-sm text-slate-500">No EHR notes on file for this patient.</p>
                   ) : (
                     <div className="mt-2 space-y-3 pr-1 text-sm">
-                      {selectedNotes.map((note) => {
+                      {selectedNotes.map((note, sectionIndex) => {
+                        const sectionId = `note-section-${sectionIndex + 1}`
+                        const isOpen = expandedEhrNoteSectionId
+                          ? expandedEhrNoteSectionId === sectionId
+                          : sectionIndex === 0
+
                         const noteTypeStyle = note.note_type.toLowerCase().includes('er') || note.note_type.toLowerCase().includes('urgent')
                           ? 'border-red-200 bg-red-50 text-red-700'
                           : note.note_type.toLowerCase().includes('discharge')
@@ -850,8 +1102,14 @@ export function OverviewView({
                           : { label: 'No Follow-up Date', style: 'border-slate-200 bg-slate-100 text-slate-700' }
 
                         return (
-                          <details key={note.note_id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
-                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70">
+                          <details id={sectionId} key={note.note_id} open={isOpen} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_12px_rgba(15,23,42,0.04)]">
+                            <summary
+                              onClick={(event) => {
+                                event.preventDefault()
+                                setExpandedEhrNoteSectionId((current) => (current === sectionId ? null : sectionId))
+                              }}
+                              className="flex cursor-pointer list-none items-start justify-between gap-3 bg-gradient-to-r from-white to-slate-50 px-4 py-3 hover:from-slate-50 hover:to-slate-100/70"
+                            >
                               <div className="min-w-0">
                                 <p className="truncate text-base font-semibold text-slate-900">{truncateText(note.primary_diagnosis, 84)}</p>
                                 <p className="mt-0.5 text-xs text-slate-600">{formatDate(note.note_date)} • ICD {note.icd_code} • Note ID {note.note_id}</p>
@@ -922,11 +1180,24 @@ export function OverviewView({
 
           <div className="col-span-7 flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-semibold text-slate-800">Suggested Pre-Call Questions</h2>
+                <button
+                  type="button"
+                  onClick={handleAiSuggestionsClick}
+                  className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                >
+                  {aiSuggestionsLoading ? 'Sending...' : 'AI Suggestions'}
+                </button>
+              </div>
               <p className="text-sm text-slate-500">
                 {visibleQuestions.filter((q) => questionStateForMember[q.id]?.checked).length}/{visibleQuestions.length} covered
               </p>
             </div>
+
+            {aiSuggestionsError ? (
+              <p className="mb-3 text-sm text-red-700">{aiSuggestionsError}</p>
+            ) : null}
 
             <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Custom Question</p>
