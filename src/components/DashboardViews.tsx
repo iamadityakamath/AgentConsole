@@ -2052,6 +2052,8 @@ export function DeepDiveView({
   const [selectedQuestions, setSelectedQuestions] = useState<SuggestedQuestion[]>([])
   const [storedView2Data, setStoredView2Data] = useState<StoredView2Data | null>(null)
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({})
+  const [showNoteInput, setShowNoteInput] = useState<boolean>(false)
+  const [callNotes, setCallNotes] = useState<string>('')
 
   const routeMemberId = (() => {
     const match = /^\/deep-dive\/([^/]+)$/.exec(window.location.pathname)
@@ -2533,31 +2535,68 @@ export function DeepDiveView({
 
   function renderRightPanel() {
     return (
-      <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-800">Questions</h3>
-            <p className="text-sm text-slate-500">{selectedQuestions.length} questions</p>
+      <div className="flex h-full flex-col gap-4 overflow-hidden">
+        <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">Questions</h3>
+              <p className="text-sm text-slate-500">{selectedQuestions.length} questions</p>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+            {selectedQuestions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">No questions selected. Go back to View 2 to select questions.</div>
+            ) : (
+              selectedQuestions.map((question) => (
+                <article key={question.id} className={`rounded-lg border-l-4 border border-slate-200 bg-white p-4 shadow-sm ${categoryBorderStyles[question.category]}`}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs font-medium text-slate-500">Source:</span>
+                    <span className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{question.category}</span>
+                  </div>
+                  <textarea
+                    placeholder="Write your answer here..."
+                    value={questionAnswers[question.id] || ''}
+                    onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
+                    rows={3}
+                    className="mt-2 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder-slate-400 transition focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300"
+                  />
+                </article>
+              ))
+            )}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
-          {selectedQuestions.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">No questions selected. Go back to View 2 to select questions.</div>
-          ) : (
-            selectedQuestions.map((question) => (
-              <article key={question.id} className={`rounded-lg border-l-4 border border-slate-200 bg-white p-4 shadow-sm ${categoryBorderStyles[question.category]}`}>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-800">{question.text}</p>
-                <textarea
-                  placeholder="Write your answer here..."
-                  value={questionAnswers[question.id] || ''}
-                  onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-                  rows={3}
-                  className="mt-2 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder-slate-400 transition focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300"
-                />
-              </article>
-            ))
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">Call Notes</h3>
+              <p className="text-sm text-slate-500">Add any additional notes</p>
+            </div>
+            <button
+              onClick={() => setShowNoteInput(!showNoteInput)}
+              className="rounded-md bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 transition"
+            >
+              {showNoteInput ? 'Hide' : 'Add Note'}
+            </button>
+          </div>
+
+          {showNoteInput && (
+            <textarea
+              placeholder="Type your call notes here..."
+              value={callNotes}
+              onChange={(e) => setCallNotes(e.target.value)}
+              rows={5}
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder-slate-400 transition focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300"
+            />
+          )}
+
+          {callNotes && !showNoteInput && (
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+              {callNotes}
+            </div>
           )}
         </div>
       </div>
