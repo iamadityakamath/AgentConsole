@@ -8,9 +8,9 @@ import type {
   PriorAuthorization,
   SeverityLevel,
 } from '../types/domain'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { TicketRow } from '../types/dashboard'
-import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from '../types/questions'
+import type { SuggestedQuestion } from '../types/questions'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
 import {
   deepDiveSections,
@@ -54,6 +54,20 @@ const categoryBorderStyles: Record<string, string> = {
   'Prior Auth': 'border-purple-500',
   Social: 'border-emerald-500',
   Utilization: 'border-teal-500',
+}
+
+function getQuestionPriorityStyle(priority: string): string {
+  const value = priority.toLowerCase()
+  if (value === 'critical') return 'border-red-200 bg-red-50 text-red-700'
+  if (value === 'high') return 'border-amber-200 bg-amber-50 text-amber-700'
+  if (value === 'medium') return 'border-yellow-200 bg-yellow-50 text-yellow-700'
+  return 'border-slate-200 bg-white text-slate-600'
+}
+
+function formatQuestionCategory(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 const gapPriorityStyles: Record<string, string> = {
@@ -227,23 +241,6 @@ interface OverviewViewProps {
   selectedMeds: Medication[]
   selectedGaps: CareGap[]
   selectedAuths: PriorAuthorization[]
-  visibleQuestions: SuggestedQuestion[]
-  questionStateForMember: Record<string, QuestionUIState>
-  newQuestionText: string
-  newQuestionCategory: QuestionCategory
-  draggingQuestionId: string | null
-  dragOverQuestionId: string | null
-  onQuestionStateChange: (questionId: string, patch: Partial<QuestionUIState>) => void
-  onFilterChange?: never
-  onSearchChange?: never
-  onNewQuestionTextChange: (value: string) => void
-  onNewQuestionCategoryChange: (category: QuestionCategory) => void
-  onAddCustomQuestion: () => void
-  onDragStart: (questionId: string) => void
-  onDragOver: (questionId: string) => void
-  onDrop: (questionId: string) => void
-  onDragEnd: () => void
-  onSkipQuestion: (questionId: string) => void
 }
 
 interface AiTimelineEvent {
@@ -459,21 +456,6 @@ export function OverviewView({
   selectedMeds,
   selectedGaps,
   selectedAuths,
-  visibleQuestions,
-  questionStateForMember,
-  newQuestionText,
-  newQuestionCategory,
-  draggingQuestionId,
-  dragOverQuestionId,
-  onQuestionStateChange,
-  onNewQuestionTextChange,
-  onNewQuestionCategoryChange,
-  onAddCustomQuestion,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  onSkipQuestion,
 }: OverviewViewProps) {
   const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
   const [labFilterByDate, setLabFilterByDate] = useState<Record<string, 'All' | 'High' | 'Low'>>({})
@@ -485,9 +467,107 @@ export function OverviewView({
   const [aiSuggestionsLoading, setAiSuggestionsLoading] = useState(false)
   const [aiSuggestionsError, setAiSuggestionsError] = useState('')
   const [aiSuggestionsData, setAiSuggestionsData] = useState<AiSuggestionsResponse | null>(null)
-  const [aiInsightsSection, setAiInsightsSection] = useState<'summary' | 'timeline' | 'questions'>('summary')
+  const [aiInsightsSection, setAiInsightsSection] = useState<'summary' | 'timeline' | 'questions' | 'alerts'>('summary')
+  const [manualQuestions, setManualQuestions] = useState<AiCoordinatorQuestion[]>([])
+  const [hiddenQuestionIds, setHiddenQuestionIds] = useState<string[]>([])
+  const [questionTextEdits, setQuestionTextEdits] = useState<Record<string, string>>({})
+  const [newQuestionText, setNewQuestionText] = useState('')
+  const [newQuestionCategory, setNewQuestionCategory] = useState('Social')
+  const [apiQuestionOrder, setApiQuestionOrder] = useState<string[]>([])
+  const [draggingApiQuestionId, setDraggingApiQuestionId] = useState<string | null>(null)
+  const [dragOverApiQuestionId, setDragOverApiQuestionId] = useState<string | null>(null)
 
   const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
+
+  const combinedQuestions = useMemo(() => {
+    const questions = [...manualQuestions, ...(aiSuggestionsData?.coordinator_questions ?? [])]
+    if (hiddenQuestionIds.length === 0) return questions
+    return questions.filter((question) => !hiddenQuestionIds.includes(question.question_id))
+  }, [manualQuestions, aiSuggestionsData, hiddenQuestionIds])
+
+  useEffect(() => {
+    const ids = combinedQuestions.map((question) => question.question_id)
+    if (ids.length === 0) {
+      setApiQuestionOrder([])
+      return
+    }
+
+    setApiQuestionOrder((current) => {
+      const retained = current.filter((id) => ids.includes(id))
+      const additions = ids.filter((id) => !retained.includes(id))
+      return [...retained, ...additions]
+    })
+  }, [combinedQuestions])
+
+  const orderedApiQuestions = useMemo(() => {
+    const questions = combinedQuestions
+    if (questions.length === 0) return []
+
+    const rank = new Map(apiQuestionOrder.map((id, index) => [id, index]))
+
+    return questions.slice().sort((a, b) => {
+      const rankA = rank.has(a.question_id) ? (rank.get(a.question_id) as number) : Number.MAX_SAFE_INTEGER
+      const rankB = rank.has(b.question_id) ? (rank.get(b.question_id) as number) : Number.MAX_SAFE_INTEGER
+      if (rankA !== rankB) return rankA - rankB
+      return a.question_id.localeCompare(b.question_id)
+    })
+  }, [combinedQuestions, apiQuestionOrder])
+
+  function addManualQuestion() {
+    const text = newQuestionText.trim()
+    if (!text) return
+
+    const questionId = `custom-q-${Date.now()}`
+    const question: AiCoordinatorQuestion = {
+      question_id: questionId,
+      source_position_id: '',
+      source_type: 'manual',
+      source_label: 'Added by Coordinator',
+      category: newQuestionCategory,
+      priority: 'Medium',
+      question_text: text,
+      clinical_context: '',
+    }
+
+    setManualQuestions((current) => [question, ...current])
+    setApiQuestionOrder((current) => [questionId, ...current.filter((id) => id !== questionId)])
+    setNewQuestionText('')
+  }
+
+  function getQuestionText(question: AiCoordinatorQuestion): string {
+    return questionTextEdits[question.question_id] ?? question.question_text
+  }
+
+  function updateQuestionText(questionId: string, value: string) {
+    setQuestionTextEdits((current) => ({
+      ...current,
+      [questionId]: value,
+    }))
+  }
+
+  function removeQuestion(questionId: string) {
+    setManualQuestions((current) => current.filter((question) => question.question_id !== questionId))
+    setHiddenQuestionIds((current) => (current.includes(questionId) ? current : [...current, questionId]))
+    setApiQuestionOrder((current) => current.filter((id) => id !== questionId))
+    setQuestionTextEdits((current) => {
+      if (!(questionId in current)) return current
+      const { [questionId]: _removed, ...remaining } = current
+      return remaining
+    })
+  }
+
+  function reorderApiQuestions(fromId: string, toId: string) {
+    if (fromId === toId) return
+
+    const fromIndex = apiQuestionOrder.indexOf(fromId)
+    const toIndex = apiQuestionOrder.indexOf(toId)
+    if (fromIndex < 0 || toIndex < 0) return
+
+    const next = apiQuestionOrder.slice()
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    setApiQuestionOrder(next)
+  }
 
   function buildAiSuggestionsPayload() {
     return {
@@ -1437,20 +1517,48 @@ export function OverviewView({
           <div className="col-span-7 flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-slate-800">AI Insights</h2>
-              <button
-                type="button"
-                onClick={handleAiSuggestionsClick}
-                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              >
-                {aiSuggestionsLoading ? 'Sending...' : 'AI Suggestions'}
-              </button>
+              <div className="flex items-center gap-2">
+                {aiSuggestionsData ? (
+                  <button
+                    type="button"
+                    onClick={handleAiSuggestionsClick}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    {aiSuggestionsLoading ? 'Refreshing...' : 'Refresh AI'}
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {aiSuggestionsError ? (
               <p className="mb-3 text-sm text-red-700">{aiSuggestionsError}</p>
             ) : null}
 
-            <div className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-3">
+            <div className="relative min-h-0 flex-1">
+              {!aiSuggestionsData ? (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/45 backdrop-blur-sm">
+                  <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white/95 p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.18)]">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">AI Insights</p>
+                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Generate Smart Suggestions</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Pull timeline, summary, and coordinator prompts from the patient data in the left panel.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAiSuggestionsClick}
+                      disabled={aiSuggestionsLoading}
+                      className="mt-5 inline-flex min-w-[180px] items-center justify-center rounded-full bg-clinical-header px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {aiSuggestionsLoading ? 'Generating...' : 'AI Suggestions'}
+                    </button>
+                    {aiSuggestionsLoading ? (
+                      <p className="mt-3 text-xs text-slate-500">Analyzing patient context...</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className={`grid h-full min-h-0 grid-cols-[220px_1fr] gap-3 transition-all duration-500 ${aiSuggestionsData ? 'opacity-100 blur-0 scale-100' : 'pointer-events-none opacity-70 blur-[2px] scale-[0.985]'}`}>
               <aside className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                 <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Insight Sections</p>
                 <div className="mt-1 space-y-1">
@@ -1470,11 +1578,19 @@ export function OverviewView({
                   </button>
                   <button
                     type="button"
+                    onClick={() => setAiInsightsSection('alerts')}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${aiInsightsSection === 'alerts' ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    Alerts
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setAiInsightsSection('questions')}
                     className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${aiInsightsSection === 'questions' ? 'bg-clinical-header text-white' : 'text-slate-700 hover:bg-slate-100'}`}
                   >
                     Suggested Questions
                   </button>
+
                 </div>
               </aside>
 
@@ -1487,40 +1603,6 @@ export function OverviewView({
                         {aiSuggestionsData?.clinical_story ?? 'Click AI Suggestions to generate a patient summary.'}
                       </p>
                     </div>
-
-                    {aiSuggestionsData?.coordinator_alerts && aiSuggestionsData.coordinator_alerts.length > 0 ? (
-                      <div className="rounded-lg border border-slate-200 bg-white p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Coordinator Alerts</p>
-                        <div className="mt-2 space-y-2">
-                          {aiSuggestionsData.coordinator_alerts
-                            .slice()
-                            .sort((a, b) => a.rank - b.rank)
-                            .map((alert) => (
-                              <article key={`${alert.rank}-${alert.alert_title}`} className="rounded-lg border border-red-200 bg-red-50 p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Rank {alert.rank}</p>
-                                <p className="mt-1 text-sm font-semibold text-red-900">{alert.alert_title}</p>
-                                <p className="mt-1 text-sm text-red-800">{alert.reason}</p>
-                                <p className="mt-1 text-xs text-red-700">Suggested opening: {alert.suggested_opening}</p>
-                                <p className="mt-1 text-xs text-red-700">
-                                  Linked IDs:{' '}
-                                  {alert.connected_position_ids.map((id, idx) => (
-                                    <span key={id}>
-                                      <button
-                                        type="button"
-                                        onClick={() => focusSourceSection(id)}
-                                        className="underline underline-offset-2 hover:text-red-900"
-                                      >
-                                        {id}
-                                      </button>
-                                      {idx < alert.connected_position_ids.length - 1 ? ', ' : ''}
-                                    </span>
-                                  ))}
-                                </p>
-                              </article>
-                            ))}
-                        </div>
-                      </div>
-                    ) : null}
 
                     {aiSuggestionsData?.missed_follow_ups && aiSuggestionsData.missed_follow_ups.length > 0 ? (
                       <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -1656,45 +1738,12 @@ export function OverviewView({
 
                 {aiInsightsSection === 'questions' ? (
                   <>
-                    {aiSuggestionsData?.coordinator_questions && aiSuggestionsData.coordinator_questions.length > 0 ? (
-                      <div className="mb-3 space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">AI Generated Questions</p>
-                        {aiSuggestionsData.coordinator_questions.map((item) => (
-                          <article key={item.question_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{item.category}</p>
-                                <p className="mt-1 text-xs text-slate-600">{item.source_label}</p>
-                                <p className="mt-1 text-sm text-slate-800">{item.question_text}</p>
-                                <p className="mt-2 text-xs text-slate-500">
-                                  Source:{' '}
-                                  <button
-                                    type="button"
-                                    onClick={() => focusSourceSection(item.source_position_id)}
-                                    className="underline underline-offset-2 hover:text-slate-700"
-                                  >
-                                    {item.source_position_id}
-                                  </button>
-                                </p>
-                                {item.clinical_context ? (
-                                  <p className="mt-1 text-xs leading-5 text-slate-600">{item.clinical_context}</p>
-                                ) : null}
-                              </div>
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${item.priority === 'critical' ? 'border-red-200 bg-red-50 text-red-700' : item.priority === 'high' ? 'border-amber-200 bg-amber-50 text-amber-700' : item.priority === 'medium' ? 'border-yellow-200 bg-yellow-50 text-yellow-700' : 'border-slate-200 bg-white text-slate-600'}`}>
-                                {item.priority}
-                              </span>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Custom Question</p>
+                    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Add Question</p>
                       <div className="flex items-center gap-2">
                         <select
                           value={newQuestionCategory}
-                          onChange={(event) => onNewQuestionCategoryChange(event.target.value as QuestionCategory)}
+                          onChange={(event) => setNewQuestionCategory(event.target.value)}
                           className="w-[140px] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-clinical-header"
                         >
                           <option value="Social">Social</option>
@@ -1707,18 +1756,19 @@ export function OverviewView({
                         <input
                           type="text"
                           value={newQuestionText}
-                          onChange={(event) => onNewQuestionTextChange(event.target.value)}
+                          onChange={(event) => setNewQuestionText(event.target.value)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                               event.preventDefault()
-                              onAddCustomQuestion()
+                              addManualQuestion()
                             }
                           }}
-                          placeholder="Type a custom question for this patient"
+                          placeholder="Type a question"
                           className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
                         />
                         <button
-                          onClick={onAddCustomQuestion}
+                          type="button"
+                          onClick={addManualQuestion}
                           className="rounded-md bg-clinical-header px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
                         >
                           Add
@@ -1726,33 +1776,39 @@ export function OverviewView({
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      {visibleQuestions.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
-                          All questions are currently skipped. Return to Ticket Queue and choose another member.
-                        </div>
-                      ) : (
-                        visibleQuestions.map((question) => (
+                    {orderedApiQuestions.length > 0 ? (
+                      <div className="mb-4 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Questions (Drag to Reorder)</p>
+                        {orderedApiQuestions.map((item) => (
                           <article
-                            key={question.id}
+                            key={item.question_id}
                             onDragOver={(event) => {
                               event.preventDefault()
-                              onDragOver(question.id)
+                              setDragOverApiQuestionId(item.question_id)
                             }}
-                            onDrop={() => onDrop(question.id)}
-                            className={`group rounded-lg border-l-4 border border-slate-200 bg-slate-50 p-3 ${categoryBorderStyles[question.category]} ${
-                              draggingQuestionId === question.id ? 'opacity-50' : ''
-                            } ${dragOverQuestionId === question.id ? 'ring-2 ring-clinical-header/40' : ''}`}
+                            onDrop={() => {
+                              if (draggingApiQuestionId) {
+                                reorderApiQuestions(draggingApiQuestionId, item.question_id)
+                              }
+                              setDraggingApiQuestionId(null)
+                              setDragOverApiQuestionId(null)
+                            }}
+                            className={`rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition ${
+                              draggingApiQuestionId === item.question_id ? 'opacity-50' : ''
+                            } ${dragOverApiQuestionId === item.question_id ? 'ring-2 ring-clinical-header/40' : ''}`}
                           >
                             <div className="flex items-start gap-3">
                               <button
                                 type="button"
                                 draggable
                                 onDragStart={(event) => {
-                                  onDragStart(question.id)
+                                  setDraggingApiQuestionId(item.question_id)
                                   event.dataTransfer.effectAllowed = 'move'
                                 }}
-                                onDragEnd={onDragEnd}
+                                onDragEnd={() => {
+                                  setDraggingApiQuestionId(null)
+                                  setDragOverApiQuestionId(null)
+                                }}
                                 className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
                                 title="Drag from handle to reorder"
                                 aria-label="Drag handle"
@@ -1766,30 +1822,107 @@ export function OverviewView({
                                   <circle cx="10" cy="11" r="1" />
                                 </svg>
                               </button>
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4"
-                                checked={questionStateForMember[question.id]?.checked ?? false}
-                                onChange={(event) => onQuestionStateChange(question.id, { checked: event.target.checked })}
-                              />
                               <div className="flex-1">
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{question.category}</p>
-                                <p className="mt-1 text-sm text-slate-800">{question.text}</p>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                        {formatQuestionCategory(item.category)}
+                                      </span>
+                                      <span className="text-xs text-slate-500">{item.source_label}</span>
+                                    </div>
+                                    <textarea
+                                      value={getQuestionText(item)}
+                                      onChange={(event) => updateQuestionText(item.question_id, event.target.value)}
+                                      rows={2}
+                                      className="mt-1 w-full resize-y rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:border-clinical-header"
+                                    />
+                                    {item.source_position_id ? (
+                                      <p className="mt-2 text-xs text-slate-500">
+                                        Source:{' '}
+                                        <button
+                                          type="button"
+                                          onClick={() => focusSourceSection(item.source_position_id)}
+                                          className="underline underline-offset-2 hover:text-slate-700"
+                                        >
+                                          {item.source_position_id}
+                                        </button>
+                                      </p>
+                                    ) : null}
+                                    {item.clinical_context ? (
+                                      <p className="mt-1 text-xs leading-5 text-slate-600">{item.clinical_context}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${getQuestionPriorityStyle(item.priority)}`}>
+                                      {item.priority}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeQuestion(item.question_id)}
+                                      className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
-                              <button
-                                onClick={() => onSkipQuestion(question.id)}
-                                className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
-                              >
-                                Skip
-                              </button>
                             </div>
                           </article>
-                        ))
-                      )}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mb-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+                        No AI suggested questions yet. Click AI Suggestions to generate them.
+                      </div>
+                    )}
                   </>
                 ) : null}
+
+
+
+                {aiInsightsSection === 'alerts' ? (
+                  <div className="space-y-2">
+                    {aiSuggestionsData?.coordinator_alerts && aiSuggestionsData.coordinator_alerts.length > 0 ? (
+                      aiSuggestionsData.coordinator_alerts
+                        .slice()
+                        .sort((a, b) => a.rank - b.rank)
+                        .map((alert) => (
+                          <article key={`${alert.rank}-${alert.alert_title}`} className="rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p className="mt-1 text-sm font-semibold text-red-900">{alert.alert_title}</p>
+                            <p className="mt-1 text-sm text-red-800">{alert.reason}</p>
+                            <p className="mt-1 text-xs text-red-700">Suggested opening: {alert.suggested_opening}</p>
+                            <p className="mt-1 text-xs text-red-700">
+                              Linked IDs:{' '}
+                              {alert.connected_position_ids.length > 0 ? (
+                                alert.connected_position_ids.map((id, idx) => (
+                                  <span key={id}>
+                                    <button
+                                      type="button"
+                                      onClick={() => focusSourceSection(id)}
+                                      className="underline underline-offset-2 hover:text-red-900"
+                                    >
+                                      {id}
+                                    </button>
+                                    {idx < alert.connected_position_ids.length - 1 ? ', ' : ''}
+                                  </span>
+                                ))
+                              ) : (
+                                'None'
+                              )}
+                            </p>
+                          </article>
+                        ))
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+                        No alerts generated yet. Click AI Suggestions to generate alerts.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
+
+            </div>
             </div>
 
           </div>

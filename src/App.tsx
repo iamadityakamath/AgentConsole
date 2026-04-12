@@ -16,11 +16,10 @@ import {
 } from './services/dashboardApi'
 import type { AppView, DashboardData, SeverityLevel } from './types/domain'
 import type { TicketRow } from './types/dashboard'
-import type { QuestionCategory, QuestionUIState, SuggestedQuestion } from './types/questions'
+import type { SuggestedQuestion } from './types/questions'
 import type { CarePlanDraft, DeepDiveQuestionResponse, DeepDiveSectionId } from './types/callWorkflow'
-import { createEmptySectionResponses, sectionFromCategory } from './utils/callWorkflow'
+import { createEmptySectionResponses } from './utils/callWorkflow'
 import { buildTickets, filterTickets } from './utils/ticketBuilder'
-import { generateSuggestedQuestions } from './utils/questionGenerator'
 
 const viewOrder: AppView[] = ['queue', 'overview', 'deep-dive', 'summary']
 
@@ -56,13 +55,6 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<'All' | SeverityLevel>('All')
   const [searchTerm, setSearchTerm] = useState('')
-  const [customQuestionsByMember, setCustomQuestionsByMember] = useState<Record<string, SuggestedQuestion[]>>({})
-  const [questionOrderByMember, setQuestionOrderByMember] = useState<Record<string, string[]>>({})
-  const [questionStateByMember, setQuestionStateByMember] = useState<Record<string, Record<string, QuestionUIState>>>({})
-  const [newQuestionText, setNewQuestionText] = useState('')
-  const [newQuestionCategory, setNewQuestionCategory] = useState<QuestionCategory>('Social')
-  const [draggingQuestionId, setDraggingQuestionId] = useState<string | null>(null)
-  const [dragOverQuestionId, setDragOverQuestionId] = useState<string | null>(null)
   const [activeDeepDiveSection, setActiveDeepDiveSection] = useState<DeepDiveSectionId>('clinical')
   const [supervisorNotesByMember, setSupervisorNotesByMember] = useState<Record<string, string[]>>({})
   const [deepDiveResponsesByMember, setDeepDiveResponsesByMember] = useState<Record<string, Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>>>({})
@@ -317,68 +309,18 @@ function App() {
     return source.slice().sort((a, b) => new Date(b.note_date).getTime() - new Date(a.note_date).getTime())
   }, [data?.ehrNotes, ehrNotesByMember, selectedMemberId])
 
-  const generatedQuestions = useMemo(
-    () => generateSuggestedQuestions({ medications: selectedMeds, labs: selectedLabs, gaps: selectedGaps, priorAuths: selectedAuths }),
-    [selectedMeds, selectedLabs, selectedGaps, selectedAuths],
-  )
-
-  const customQuestions = selectedMemberId ? (customQuestionsByMember[selectedMemberId] ?? []) : []
-  const allQuestions = useMemo(() => [...generatedQuestions, ...customQuestions], [generatedQuestions, customQuestions])
-
-  const claimsQuestions = useMemo(() => {
-    if (!selectedTicket) return []
-
-    const erVisits = selectedClaims.filter((claim) => claim.place_of_service === 'Emergency Room').length
-    const inpatientStays = selectedClaims.filter((claim) => claim.place_of_service === 'Inpatient Hospital').length
-    const totalBilled = selectedClaims.reduce((sum, claim) => sum + claim.billed_amount, 0)
-
-    return [
-      {
-        id: `utilization-er-${selectedTicket.memberId}`,
-        category: 'Utilization' as const,
-        text: `You visited the ER ${erVisits} times in the past year - can you tell me what was happening during those visits?`,
-      },
-      {
-        id: `utilization-inpatient-${selectedTicket.memberId}`,
-        category: 'Utilization' as const,
-        text: `We see ${inpatientStays} inpatient stays on file. What was the main reason for those hospital stays?`,
-      },
-      {
-        id: `utilization-cost-${selectedTicket.memberId}`,
-        category: 'Utilization' as const,
-        text: `Your claims show about ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalBilled)} in billed services. Have any of those care episodes been difficult to manage or follow up on afterward?`,
-      },
-    ] satisfies SuggestedQuestion[]
-  }, [selectedClaims, selectedTicket])
+  const allQuestions = useMemo<SuggestedQuestion[]>(() => [], [])
 
   const sectionQuestions = useMemo(() => {
-    const all = [...allQuestions, ...claimsQuestions]
-
     return {
-      clinical: all.filter((question) => sectionFromCategory(question.category) === 'clinical'),
-      labs: all.filter((question) => sectionFromCategory(question.category) === 'labs'),
-      medications: all.filter((question) => sectionFromCategory(question.category) === 'medications'),
-      gaps: all.filter((question) => sectionFromCategory(question.category) === 'gaps'),
-      auths: all.filter((question) => sectionFromCategory(question.category) === 'auths'),
-      claims: all.filter((question) => sectionFromCategory(question.category) === 'claims'),
+      clinical: [] as SuggestedQuestion[],
+      labs: [] as SuggestedQuestion[],
+      medications: [] as SuggestedQuestion[],
+      gaps: [] as SuggestedQuestion[],
+      auths: [] as SuggestedQuestion[],
+      claims: [] as SuggestedQuestion[],
     } satisfies Record<DeepDiveSectionId, SuggestedQuestion[]>
-  }, [allQuestions, claimsQuestions])
-
-  const orderedQuestions = useMemo(() => {
-    const memberOrder = selectedMemberId ? (questionOrderByMember[selectedMemberId] ?? []) : []
-    const rank = new Map(memberOrder.map((id, index) => [id, index]))
-    const indexMap = new Map(allQuestions.map((question, index) => [question.id, index]))
-
-    return allQuestions.slice().sort((a, b) => {
-      const rankA = rank.has(a.id) ? (rank.get(a.id) as number) : Number.MAX_SAFE_INTEGER
-      const rankB = rank.has(b.id) ? (rank.get(b.id) as number) : Number.MAX_SAFE_INTEGER
-      if (rankA !== rankB) return rankA - rankB
-      return (indexMap.get(a.id) as number) - (indexMap.get(b.id) as number)
-    })
-  }, [allQuestions, questionOrderByMember, selectedMemberId])
-
-  const questionStateForMember = selectedMemberId ? (questionStateByMember[selectedMemberId] ?? {}) : {}
-  const visibleQuestions = useMemo(() => orderedQuestions.filter((question) => !questionStateForMember[question.id]?.skipped), [orderedQuestions, questionStateForMember])
+  }, [])
   const deepDiveStateForMember = selectedMemberId ? (deepDiveResponsesByMember[selectedMemberId] ?? createEmptySectionResponses()) : createEmptySectionResponses()
   const supervisorNotes = selectedMemberId ? (supervisorNotesByMember[selectedMemberId] ?? []) : []
   const currentCarePlanDraft = selectedMemberId ? (carePlanDraftByMember[selectedMemberId] ?? null) : null
@@ -408,7 +350,7 @@ function App() {
       Object.entries(sectionResponses)
         .filter(([, response]) => response.status === 'Needs Follow-Up')
         .map(([questionId, response]) => {
-          const question = [...allQuestions, ...claimsQuestions].find((entry) => entry.id === questionId)
+          const question = allQuestions.find((entry) => entry.id === questionId)
           const label = question?.text ?? questionId
           return response.notes.trim() ? `${label} - ${response.notes.trim()}` : label
         }),
@@ -445,81 +387,6 @@ function App() {
 
   function completeCall() {
     if (selectedMemberId) navigate(`/summary/${encodeURIComponent(selectedMemberId)}`)
-  }
-
-  function setQuestionState(questionId: string, patch: Partial<QuestionUIState>) {
-    if (!selectedMemberId) return
-
-    setQuestionStateByMember((prev) => {
-      const memberMap = prev[selectedMemberId] ?? {}
-      const current = memberMap[questionId] ?? { checked: false, skipped: false }
-
-      return {
-        ...prev,
-        [selectedMemberId]: {
-          ...memberMap,
-          [questionId]: {
-            ...current,
-            ...patch,
-          },
-        },
-      }
-    })
-  }
-
-  function addCustomQuestion() {
-    if (!selectedMemberId) return
-
-    const text = newQuestionText.trim()
-    if (!text) return
-
-    const customQuestion: SuggestedQuestion = {
-      id: `custom-${selectedMemberId}-${Date.now()}`,
-      category: newQuestionCategory,
-      text,
-    }
-
-    setCustomQuestionsByMember((prev) => {
-      const existing = prev[selectedMemberId] ?? []
-      return {
-        ...prev,
-        [selectedMemberId]: [...existing, customQuestion],
-      }
-    })
-
-    setQuestionOrderByMember((prev) => {
-      const existing = prev[selectedMemberId] ?? []
-      return {
-        ...prev,
-        [selectedMemberId]: [...existing, customQuestion.id],
-      }
-    })
-
-    setNewQuestionText('')
-  }
-
-  function reorderQuestions(fromId: string, toId: string) {
-    if (!selectedMemberId || fromId === toId) return
-
-    const currentIds = orderedQuestions.map((question) => question.id)
-    const fromIndex = currentIds.indexOf(fromId)
-    const toIndex = currentIds.indexOf(toId)
-    if (fromIndex < 0 || toIndex < 0) return
-
-    const nextIds = currentIds.slice()
-    const [moved] = nextIds.splice(fromIndex, 1)
-    nextIds.splice(toIndex, 0, moved)
-
-    setQuestionOrderByMember((prev) => ({
-      ...prev,
-      [selectedMemberId]: nextIds,
-    }))
-  }
-
-  function onQuestionDrop(targetQuestionId: string) {
-    if (draggingQuestionId) reorderQuestions(draggingQuestionId, targetQuestionId)
-    setDraggingQuestionId(null)
-    setDragOverQuestionId(null)
   }
 
   function updateDeepDiveQuestion(sectionId: DeepDiveSectionId, questionId: string, patch: Partial<DeepDiveQuestionResponse>) {
@@ -639,7 +506,6 @@ function App() {
   function startNewCall() {
     navigate('/queue')
     setActiveDeepDiveSection('clinical')
-    setNewQuestionText('')
     setDraftToastVisible(false)
   }
 
@@ -738,24 +604,6 @@ function App() {
                 selectedMeds={selectedMeds}
                 selectedGaps={selectedGaps}
                 selectedAuths={selectedAuths}
-                visibleQuestions={visibleQuestions}
-                questionStateForMember={questionStateForMember}
-                newQuestionText={newQuestionText}
-                newQuestionCategory={newQuestionCategory}
-                draggingQuestionId={draggingQuestionId}
-                dragOverQuestionId={dragOverQuestionId}
-                onQuestionStateChange={setQuestionState}
-                onNewQuestionTextChange={setNewQuestionText}
-                onNewQuestionCategoryChange={setNewQuestionCategory}
-                onAddCustomQuestion={addCustomQuestion}
-                onDragStart={setDraggingQuestionId}
-                onDragOver={setDragOverQuestionId}
-                onDrop={onQuestionDrop}
-                onDragEnd={() => {
-                  setDraggingQuestionId(null)
-                  setDragOverQuestionId(null)
-                }}
-                onSkipQuestion={(questionId) => setQuestionState(questionId, { skipped: true })}
                 />
               )} />
               <Route path="/deep-dive/:memberId" element={(
