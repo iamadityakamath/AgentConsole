@@ -16,7 +16,8 @@ import type {
   DeepDiveQuestionResponse,
   DeepDiveSectionId,
 } from '../types/callWorkflow'
-import { downloadCarePlanDocx } from '../utils/carePlanDocx'
+import { useCallback } from 'react'
+import { downloadCarePlanPdf } from '../utils/carePlanPdf'
 
 const severityPillStyles: Record<SeverityLevel, string> = {
   Critical: 'bg-red-100 text-red-700 border-red-200',
@@ -2912,8 +2913,15 @@ export function DeepDiveView({
 }
 
 export function SummaryView() {
-  const [isExporting, setIsExporting] = useState(false)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [exportError, setExportError] = useState('')
+  const [patientName, setPatientName] = useState('')
+  const [primaryConditions, setPrimaryConditions] = useState('')
+  const [assignedCoordinator, setAssignedCoordinator] = useState('')
+  const [riskTier, setRiskTier] = useState('')
+  const [dischargePlan, setDischargePlan] = useState('')
+  const [editableCallNotes, setEditableCallNotes] = useState('')
+  const [editableQuestions, setEditableQuestions] = useState<SuggestedQuestion[]>([])
 
   const routeMemberId = (() => {
     const match = /^\/summary\/([^/]+)$/.exec(window.location.pathname)
@@ -2941,81 +2949,263 @@ export function SummaryView() {
 
   const canExport = Boolean(view2Data?.patientDetail)
 
-  async function handleExportDocx() {
+  useEffect(() => {
+    if (!view2Data?.patientDetail) return
+    setPatientName(view2Data.patientDetail.full_name ?? '')
+    setPrimaryConditions(view2Data.patientDetail.primary_conditions ?? '')
+    setAssignedCoordinator(view2Data.patientDetail.assigned_coordinator ?? '')
+    setRiskTier(view2Data.patientDetail.risk_tier ?? '')
+    setDischargePlan(view2Data.notes[0]?.plan ?? '')
+    setEditableCallNotes(callNotes)
+    setEditableQuestions(selectedQuestions)
+  }, [view2Data?.patientDetail, view2Data?.notes, callNotes, selectedQuestions])
+
+  function updateQuestionText(questionId: string, field: 'text' | 'patient_answer', value: string) {
+    setEditableQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+            ...question,
+            [field]: value,
+          }
+          : question,
+      ),
+    )
+  }
+
+  const handleExportPdf = useCallback(async () => {
     if (!view2Data?.patientDetail) {
       setExportError('Patient details are missing. Open View 2 first to load data before exporting.')
       return
     }
 
-    setIsExporting(true)
+    setIsExportingPdf(true)
     setExportError('')
 
     try {
-      await downloadCarePlanDocx({
-        patientDetail: view2Data.patientDetail,
-        notes: view2Data.notes,
+      const updatedPatient = {
+        ...view2Data.patientDetail,
+        full_name: patientName,
+        primary_conditions: primaryConditions,
+        assigned_coordinator: assignedCoordinator,
+        risk_tier: riskTier,
+      }
+
+      const updatedNotes = [...view2Data.notes]
+      if (updatedNotes[0]) {
+        updatedNotes[0] = {
+          ...updatedNotes[0],
+          plan: dischargePlan,
+        }
+      }
+
+      downloadCarePlanPdf({
+        patientDetail: updatedPatient,
+        notes: updatedNotes,
         labs: view2Data.labs,
         medications: view2Data.meds,
-        careGaps: view2Data.gaps,
-        priorAuths: view2Data.auths,
-        selectedQuestions,
-        callNotes,
+        care_gaps: view2Data.gaps,
+        prior_auths: view2Data.auths,
+        selectedQuestions: editableQuestions,
+        callNotes: editableCallNotes,
         careplanDate: new Date().toISOString().slice(0, 10),
       })
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Failed to generate DOCX file')
+      setExportError(error instanceof Error ? error.message : 'Failed to generate PDF file')
     } finally {
-      setIsExporting(false)
+      setIsExportingPdf(false)
     }
-  }
+  }, [
+    view2Data,
+    patientName,
+    primaryConditions,
+    assignedCoordinator,
+    riskTier,
+    dischargePlan,
+    editableQuestions,
+    editableCallNotes,
+  ])
+
+  useEffect(() => {
+    const onExportPdf = () => {
+      void handleExportPdf()
+    }
+
+    window.addEventListener('summary-export-pdf', onExportPdf)
+    return () => {
+      window.removeEventListener('summary-export-pdf', onExportPdf)
+    }
+  }, [handleExportPdf])
 
   return (
-    <div className="summary-print-root min-h-[720px] bg-white px-6 py-8">
-      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-slate-50 p-6 shadow-sm">
-        <h2 className="text-2xl font-semibold text-slate-900">Care Plan Document Export</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Export View 2 clinical data and View 3 call responses into a Word document.
-        </p>
+    <div className="summary-print-root h-full min-h-0 overflow-hidden bg-slate-100 px-4 py-4">
+      <div className="mx-auto grid h-full min-h-0 max-w-7xl gap-5 lg:grid-cols-[420px_1fr]">
+        <section className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Editable Fields</h2>
+          <p className="mt-1 text-sm text-slate-600">Edit text fields below and export a Word file from this view.</p>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 text-sm text-slate-700 md:grid-cols-4">
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Labs</p>
-            <p className="mt-1 text-lg font-semibold">{view2Data?.labs.length ?? 0}</p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Medications</p>
-            <p className="mt-1 text-lg font-semibold">{view2Data?.meds.length ?? 0}</p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Care Gaps</p>
-            <p className="mt-1 text-lg font-semibold">{view2Data?.gaps.length ?? 0}</p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Selected Questions</p>
-            <p className="mt-1 text-lg font-semibold">{selectedQuestions.length}</p>
-          </div>
-        </div>
+          {!canExport ? (
+            <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Missing patient data in session. Open View 2 and View 3 for this member, then return here.
+            </p>
+          ) : null}
 
-        {!canExport ? (
-          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Missing patient data in session. Open View 2 and View 3 for this member, then return here.
-          </p>
-        ) : null}
+          <div className="mt-4 space-y-3 text-sm">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Patient Name</span>
+              <input
+                value={patientName}
+                onChange={(event) => setPatientName(event.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+              />
+            </label>
 
-        {exportError ? (
-          <p className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{exportError}</p>
-        ) : null}
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Primary Conditions</span>
+              <textarea
+                rows={2}
+                value={primaryConditions}
+                onChange={(event) => setPrimaryConditions(event.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+              />
+            </label>
 
-        <div className="mt-6">
-          <button
-            type="button"
-            onClick={handleExportDocx}
-            disabled={isExporting || !canExport}
-            className="rounded-full bg-clinical-header px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isExporting ? 'Generating Word Document...' : 'Download Care Plan (.docx)'}
-          </button>
-        </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Coordinator</span>
+                <input
+                  value={assignedCoordinator}
+                  onChange={(event) => setAssignedCoordinator(event.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Risk Tier</span>
+                <input
+                  value={riskTier}
+                  onChange={(event) => setRiskTier(event.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+                />
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Discharge Plan</span>
+              <textarea
+                rows={4}
+                value={dischargePlan}
+                onChange={(event) => setDischargePlan(event.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Call Notes</span>
+              <textarea
+                rows={4}
+                value={editableCallNotes}
+                onChange={(event) => setEditableCallNotes(event.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3 text-sm text-slate-700 md:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Labs</p>
+              <p className="mt-1 text-lg font-semibold">{view2Data?.labs.length ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Meds</p>
+              <p className="mt-1 text-lg font-semibold">{view2Data?.meds.length ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Care Gaps</p>
+              <p className="mt-1 text-lg font-semibold">{view2Data?.gaps.length ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Questions</p>
+              <p className="mt-1 text-lg font-semibold">{editableQuestions.length}</p>
+            </div>
+          </div>
+
+          {exportError ? (
+            <p className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{exportError}</p>
+          ) : null}
+
+          <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            Use the footer button on the bottom-right to download the care plan PDF.
+          </div>
+
+          {isExportingPdf ? (
+            <p className="mt-3 text-xs font-medium text-slate-600">Generating PDF document...</p>
+          ) : null}
+
+          <div className="mt-5 space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Edit Questions & Responses</h3>
+            <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+              {editableQuestions.map((question) => (
+                <article key={question.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{question.id} • {question.sourceLabel ?? 'General'}</p>
+                  <textarea
+                    rows={2}
+                    value={question.text}
+                    onChange={(event) => updateQuestionText(question.id, 'text', event.target.value)}
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-clinical-header"
+                  />
+                  <textarea
+                    rows={2}
+                    value={question.patient_answer ?? ''}
+                    onChange={(event) => updateQuestionText(question.id, 'patient_answer', event.target.value)}
+                    placeholder="Patient response"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-clinical-header"
+                  />
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mx-auto max-w-[780px] rounded-md border border-slate-200 bg-white px-10 py-9 shadow-[0_2px_20px_rgba(15,23,42,0.06)]">
+            <p className="text-center text-xs uppercase tracking-[0.22em] text-slate-500">Word Document Preview</p>
+            <h2 className="mt-2 text-center text-3xl font-semibold tracking-tight text-slate-900">Patient Care Plan</h2>
+            <p className="mt-1 text-center text-sm text-slate-500">{new Date().toISOString().slice(0, 10)}</p>
+
+            <div className="mt-8 space-y-6 text-[15px] leading-7 text-slate-800">
+              <section>
+                <h3 className="border-b border-slate-200 pb-1 text-base font-semibold text-slate-900">Patient Identification</h3>
+                <p className="mt-2"><span className="font-semibold">Name:</span> {patientName || '-'}</p>
+                <p><span className="font-semibold">Conditions:</span> {primaryConditions || '-'}</p>
+                <p><span className="font-semibold">Risk Tier:</span> {riskTier || '-'}</p>
+                <p><span className="font-semibold">Coordinator:</span> {assignedCoordinator || '-'}</p>
+              </section>
+
+              <section>
+                <h3 className="border-b border-slate-200 pb-1 text-base font-semibold text-slate-900">Discharge Plan</h3>
+                <p className="mt-2 whitespace-pre-wrap">{dischargePlan || '-'}</p>
+              </section>
+
+              <section>
+                <h3 className="border-b border-slate-200 pb-1 text-base font-semibold text-slate-900">Call Q&A</h3>
+                <div className="mt-2 space-y-2">
+                  {editableQuestions.map((question) => (
+                    <div key={question.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="font-medium text-slate-900">{question.id}: {question.text}</p>
+                      <p className="mt-1 text-slate-700">Response: {question.patient_answer?.trim() ? question.patient_answer : 'No response recorded'}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="border-b border-slate-200 pb-1 text-base font-semibold text-slate-900">Call Notes</h3>
+                <p className="mt-2 whitespace-pre-wrap">{editableCallNotes || '-'}</p>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   )

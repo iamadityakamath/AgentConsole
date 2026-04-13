@@ -836,7 +836,14 @@ function App() {
               >
                 Next
               </button>
-            ) : null}
+            ) : (
+              <button
+                onClick={() => window.dispatchEvent(new Event('summary-export-pdf'))}
+                className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white"
+              >
+                Download Care Plan (.pdf)
+              </button>
+            )}
           </footer>
         ) : null}
       </div>
