@@ -37,33 +37,23 @@ const gapPriorityRank: Record<string, number> = {
   Low: 1,
 }
 
-const LOCAL_CACHE_KEYS = {
-  dashboardData: 'app-cache-dashboard-data',
-  patientDetails: 'app-cache-patient-details-by-member',
-  careGaps: 'app-cache-care-gaps-by-member',
-  labResults: 'app-cache-lab-results-by-member',
-  medications: 'app-cache-medications-by-member',
-  priorAuths: 'app-cache-prior-auths-by-member',
-  ehrNotes: 'app-cache-ehr-notes-by-member',
-} as const
+const LEGACY_APP_CACHE_KEYS = [
+  'app-cache-dashboard-data',
+  'app-cache-patient-details-by-member',
+  'app-cache-care-gaps-by-member',
+  'app-cache-lab-results-by-member',
+  'app-cache-medications-by-member',
+  'app-cache-prior-auths-by-member',
+  'app-cache-ehr-notes-by-member',
+] as const
 
-function readLocalCache<T>(key: string, fallback: T): T {
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (!raw) return fallback
-    return JSON.parse(raw) as T
-  } catch {
-    return fallback
-  }
-}
+const LEGACY_DEEP_DIVE_PREFIXES = [
+  'deep-dive-selected-questions:',
+  'deep-dive-question-answers:',
+  'deep-dive-call-notes:',
+] as const
 
-function writeLocalCache<T>(key: string, value: T) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Ignore localStorage write failures (quota/private mode)
-  }
-}
+const LEGACY_VIEW2_PANEL_PREFIX = 'view2-panel-data:'
 
 function App() {
   const location = useLocation()
@@ -106,57 +96,65 @@ function App() {
   const [ehrNotesByMember, setEhrNotesByMember] = useState<Record<string, DashboardData['ehrNotes']>>({})
   const [ehrNotesLoadingByMember, setEhrNotesLoadingByMember] = useState<Record<string, boolean>>({})
   const [ehrNotesErrorByMember, setEhrNotesErrorByMember] = useState<Record<string, string>>({})
-  const [cacheHydrated, setCacheHydrated] = useState(false)
+  const [cacheHydrated] = useState(true)
 
   // Refs for page components to expose their save functions
   const overviewPageRef = useRef<OverviewPageHandle>(null)
   const deepDivePageRef = useRef<DeepDivePageHandle>(null)
 
   useEffect(() => {
-    setData(readLocalCache<DashboardData | null>(LOCAL_CACHE_KEYS.dashboardData, null))
-    setPatientDetailsByMember(readLocalCache<Record<string, PatientDetailApiRecord>>(LOCAL_CACHE_KEYS.patientDetails, {}))
-    setCareGapsByMember(readLocalCache<Record<string, DashboardData['careGaps']>>(LOCAL_CACHE_KEYS.careGaps, {}))
-    setLabResultsByMember(readLocalCache<Record<string, DashboardData['labResults']>>(LOCAL_CACHE_KEYS.labResults, {}))
-    setMedicationsByMember(readLocalCache<Record<string, DashboardData['medications']>>(LOCAL_CACHE_KEYS.medications, {}))
-    setPriorAuthsByMember(readLocalCache<Record<string, DashboardData['priorAuths']>>(LOCAL_CACHE_KEYS.priorAuths, {}))
-    setEhrNotesByMember(readLocalCache<Record<string, DashboardData['ehrNotes']>>(LOCAL_CACHE_KEYS.ehrNotes, {}))
-    setCacheHydrated(true)
+    LEGACY_APP_CACHE_KEYS.forEach((key) => {
+      window.localStorage.removeItem(key)
+    })
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (!key) continue
+      if (LEGACY_DEEP_DIVE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        window.localStorage.removeItem(key)
+        index -= 1
+      }
+    }
+
+    const view2Keys: string[] = []
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (key && key.startsWith(LEGACY_VIEW2_PANEL_PREFIX)) {
+        view2Keys.push(key)
+      }
+    }
+
+    view2Keys.forEach((legacyKey) => {
+      const memberId = legacyKey.slice(LEGACY_VIEW2_PANEL_PREFIX.length)
+      const legacyRaw = window.localStorage.getItem(legacyKey)
+      if (!memberId || !legacyRaw) {
+        window.localStorage.removeItem(legacyKey)
+        return
+      }
+
+      try {
+        const view2Data = JSON.parse(legacyRaw)
+        const sessionKey = `deep-dive-session:${memberId}`
+        let existing: { selectedQuestions?: unknown; callNotes?: unknown } = {}
+        try {
+          const existingRaw = window.localStorage.getItem(sessionKey)
+          existing = existingRaw ? JSON.parse(existingRaw) : {}
+        } catch {
+          existing = {}
+        }
+
+        window.localStorage.setItem(sessionKey, JSON.stringify({
+          selectedQuestions: Array.isArray(existing.selectedQuestions) ? existing.selectedQuestions : [],
+          callNotes: typeof existing.callNotes === 'string' ? existing.callNotes : '',
+          view2Data,
+        }))
+      } catch {
+        // Ignore invalid legacy payloads
+      } finally {
+        window.localStorage.removeItem(legacyKey)
+      }
+    })
   }, [])
-
-  useEffect(() => {
-    if (!cacheHydrated || !data) return
-    writeLocalCache(LOCAL_CACHE_KEYS.dashboardData, data)
-  }, [cacheHydrated, data])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.patientDetails, patientDetailsByMember)
-  }, [cacheHydrated, patientDetailsByMember])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.careGaps, careGapsByMember)
-  }, [cacheHydrated, careGapsByMember])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.labResults, labResultsByMember)
-  }, [cacheHydrated, labResultsByMember])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.medications, medicationsByMember)
-  }, [cacheHydrated, medicationsByMember])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.priorAuths, priorAuthsByMember)
-  }, [cacheHydrated, priorAuthsByMember])
-
-  useEffect(() => {
-    if (!cacheHydrated) return
-    writeLocalCache(LOCAL_CACHE_KEYS.ehrNotes, ehrNotesByMember)
-  }, [cacheHydrated, ehrNotesByMember])
 
   useEffect(() => {
     if (!cacheHydrated) return
@@ -182,7 +180,7 @@ function App() {
   const selectedMemberId = routeMatch?.memberId ?? null
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || patientDetailsByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || patientDetailsByMember[selectedMemberId]) return
 
     setPatientDetailsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setPatientDetailsErrorByMember((prev) => {
@@ -207,7 +205,7 @@ function App() {
   }, [cacheHydrated, currentView, selectedMemberId, patientDetailsByMember])
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || careGapsByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || careGapsByMember[selectedMemberId]) return
 
     setCareGapsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setCareGapsErrorByMember((prev) => {
@@ -232,7 +230,7 @@ function App() {
   }, [cacheHydrated, currentView, selectedMemberId, careGapsByMember])
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || labResultsByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || labResultsByMember[selectedMemberId]) return
 
     setLabResultsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setLabResultsErrorByMember((prev) => {
@@ -257,7 +255,7 @@ function App() {
   }, [cacheHydrated, currentView, selectedMemberId, labResultsByMember])
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || medicationsByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || medicationsByMember[selectedMemberId]) return
 
     setMedicationsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setMedicationsErrorByMember((prev) => {
@@ -282,7 +280,7 @@ function App() {
   }, [cacheHydrated, currentView, selectedMemberId, medicationsByMember])
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || priorAuthsByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || priorAuthsByMember[selectedMemberId]) return
 
     setPriorAuthsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setPriorAuthsErrorByMember((prev) => {
@@ -307,7 +305,7 @@ function App() {
   }, [cacheHydrated, currentView, selectedMemberId, priorAuthsByMember])
 
   useEffect(() => {
-    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || ehrNotesByMember[selectedMemberId]) return
+    if (!cacheHydrated || !selectedMemberId || currentView === 'queue' || ehrNotesByMember[selectedMemberId]) return
 
     setEhrNotesLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setEhrNotesErrorByMember((prev) => {
@@ -330,6 +328,78 @@ function App() {
       }
     })()
   }, [cacheHydrated, currentView, selectedMemberId, ehrNotesByMember])
+
+  useEffect(() => {
+    if (!selectedMemberId || currentView === 'queue') return
+
+    const selectedMember = data?.members.find((member) => member.member_id === selectedMemberId) ?? null
+    const sessionKey = `deep-dive-session:${selectedMemberId}`
+    let existingSession: { selectedQuestions?: unknown; callNotes?: unknown; view2Data?: Record<string, unknown> } = {}
+    try {
+      const existingRaw = window.localStorage.getItem(sessionKey)
+      existingSession = existingRaw ? JSON.parse(existingRaw) : {}
+    } catch {
+      existingSession = {}
+    }
+
+    const existingView2Data = (existingSession.view2Data && typeof existingSession.view2Data === 'object')
+      ? existingSession.view2Data as {
+        member?: unknown
+        patientDetail?: unknown
+        notes?: unknown
+        labs?: unknown
+        meds?: unknown
+        gaps?: unknown
+        auths?: unknown
+      }
+      : {}
+
+    const hasPatientDetail = Object.prototype.hasOwnProperty.call(patientDetailsByMember, selectedMemberId)
+    const hasNotes = Object.prototype.hasOwnProperty.call(ehrNotesByMember, selectedMemberId)
+    const hasLabs = Object.prototype.hasOwnProperty.call(labResultsByMember, selectedMemberId)
+    const hasMeds = Object.prototype.hasOwnProperty.call(medicationsByMember, selectedMemberId)
+    const hasGaps = Object.prototype.hasOwnProperty.call(careGapsByMember, selectedMemberId)
+    const hasAuths = Object.prototype.hasOwnProperty.call(priorAuthsByMember, selectedMemberId)
+
+    const view2Data = {
+      memberId: selectedMemberId,
+      member: selectedMember ?? (existingView2Data.member ?? null),
+      patientDetail: hasPatientDetail
+        ? (patientDetailsByMember[selectedMemberId] ?? null)
+        : (existingView2Data.patientDetail ?? null),
+      notes: hasNotes
+        ? (ehrNotesByMember[selectedMemberId] ?? [])
+        : (Array.isArray(existingView2Data.notes) ? existingView2Data.notes : []),
+      labs: hasLabs
+        ? (labResultsByMember[selectedMemberId] ?? [])
+        : (Array.isArray(existingView2Data.labs) ? existingView2Data.labs : []),
+      meds: hasMeds
+        ? (medicationsByMember[selectedMemberId] ?? [])
+        : (Array.isArray(existingView2Data.meds) ? existingView2Data.meds : []),
+      gaps: hasGaps
+        ? (careGapsByMember[selectedMemberId] ?? [])
+        : (Array.isArray(existingView2Data.gaps) ? existingView2Data.gaps : []),
+      auths: hasAuths
+        ? (priorAuthsByMember[selectedMemberId] ?? [])
+        : (Array.isArray(existingView2Data.auths) ? existingView2Data.auths : []),
+    }
+
+    window.localStorage.setItem(sessionKey, JSON.stringify({
+      selectedQuestions: Array.isArray(existingSession.selectedQuestions) ? existingSession.selectedQuestions : [],
+      callNotes: typeof existingSession.callNotes === 'string' ? existingSession.callNotes : '',
+      view2Data,
+    }))
+  }, [
+    currentView,
+    selectedMemberId,
+    data,
+    patientDetailsByMember,
+    ehrNotesByMember,
+    labResultsByMember,
+    medicationsByMember,
+    careGapsByMember,
+    priorAuthsByMember,
+  ])
 
   useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return

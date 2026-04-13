@@ -58,6 +58,7 @@ function getQuestionPriorityStyle(priority: string): string {
 }
 
 function formatQuestionCategory(value: string): string {
+
   return value
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase())
@@ -485,7 +486,11 @@ export function OverviewView({
   const [dragOverApiQuestionId, setDragOverApiQuestionId] = useState<string | null>(null)
 
   const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
-  const selectedMemberId = selectedMember?.member_id ?? selectedTicket?.memberId ?? ''
+  const routeMemberId = (() => {
+    const match = /^\/overview\/([^/]+)$/.exec(window.location.pathname)
+    return match?.[1] ? decodeURIComponent(match[1]) : ''
+  })()
+  const selectedMemberId = selectedMember?.member_id ?? selectedTicket?.memberId ?? routeMemberId
 
   const combinedQuestions = useMemo(() => {
     const questions = [...manualQuestions, ...(aiSuggestionsData?.coordinator_questions ?? [])]
@@ -535,6 +540,58 @@ export function OverviewView({
     })
   }, [orderedApiQuestions])
 
+  useEffect(() => {
+    if (!selectedMemberId) return
+
+    const selectedForDeepDive = orderedApiQuestions
+      .filter((question) => selectedQuestionIds.includes(question.question_id))
+      .map((question) => ({
+        id: question.question_id,
+        category: (question.category as SuggestedQuestion['category']) ?? 'Social',
+        text: questionTextEdits[question.question_id] ?? question.question_text,
+        sourcePositionId: question.source_position_id,
+        sourceType: question.source_type,
+        sourceLabel: question.source_label,
+      }))
+
+    const snapshot: StoredView2Data = {
+      memberId: selectedMemberId,
+      member: selectedMember ?? null,
+      patientDetail: selectedPatientDetail ?? null,
+      notes: selectedNotes,
+      labs: selectedLabs,
+      meds: selectedMeds,
+      gaps: selectedGaps,
+      auths: selectedAuths,
+    }
+
+    const existingSessionRaw = window.localStorage.getItem(`deep-dive-session:${selectedMemberId}`)
+    let existingSession: { callNotes?: string } = {}
+    try {
+      existingSession = existingSessionRaw ? JSON.parse(existingSessionRaw) : {}
+    } catch {
+      // ignore parse errors
+    }
+
+    window.localStorage.setItem(`deep-dive-session:${selectedMemberId}`, JSON.stringify({
+      selectedQuestions: selectedForDeepDive,
+      callNotes: existingSession.callNotes ?? '',
+      view2Data: snapshot,
+    }))
+  }, [
+    selectedMemberId,
+    selectedMember,
+    selectedPatientDetail,
+    selectedNotes,
+    selectedLabs,
+    selectedMeds,
+    selectedGaps,
+    selectedAuths,
+    orderedApiQuestions,
+    selectedQuestionIds,
+    questionTextEdits,
+  ])
+
   // Expose save function through ref for explicit saves before navigating
   useImperativeHandle(
     forwardedRef,
@@ -553,9 +610,8 @@ export function OverviewView({
             sourceType: question.source_type,
             sourceLabel: question.source_label,
           }))
-        window.localStorage.setItem(`deep-dive-selected-questions:${selectedMemberId}`, JSON.stringify(selectedForDeepDive))
-
-        // Save View 2 panel data
+        
+        // Build View 2 snapshot and merge into session payload
         const snapshot: StoredView2Data = {
           memberId: selectedMemberId,
           member: selectedMember ?? null,
@@ -566,45 +622,28 @@ export function OverviewView({
           gaps: selectedGaps,
           auths: selectedAuths,
         }
-        window.localStorage.setItem(`view2-panel-data:${selectedMemberId}`, JSON.stringify(snapshot))
+
+        // Get existing session data and update with latest questions + snapshot
+        const existingSessionRaw = window.localStorage.getItem(`deep-dive-session:${selectedMemberId}`)
+        let existingSession: { selectedQuestions?: SuggestedQuestion[]; callNotes?: string; view2Data?: StoredView2Data } = {}
+        try {
+          existingSession = existingSessionRaw ? JSON.parse(existingSessionRaw) : existingSession
+        } catch {
+          // ignore parse errors
+        }
+        
+        // Update session with new questions
+        const updatedSession = {
+          selectedQuestions: selectedForDeepDive,
+          callNotes: existingSession.callNotes ?? '',
+          view2Data: snapshot,
+        }
+        window.localStorage.setItem(`deep-dive-session:${selectedMemberId}`, JSON.stringify(updatedSession))
+        window.localStorage.removeItem(`view2-panel-data:${selectedMemberId}`)
       },
     }),
     [selectedMemberId, selectedMember, selectedPatientDetail, selectedNotes, selectedLabs, selectedMeds, selectedGaps, selectedAuths, orderedApiQuestions, selectedQuestionIds, questionTextEdits],
   )
-
-  useEffect(() => {
-    if (!selectedMemberId) return
-
-    const selectedForDeepDive = orderedApiQuestions
-      .filter((question) => selectedQuestionIds.includes(question.question_id))
-      .map((question) => ({
-        id: question.question_id,
-        category: (question.category as SuggestedQuestion['category']) ?? 'Social',
-        text: questionTextEdits[question.question_id] ?? question.question_text,
-        sourcePositionId: question.source_position_id,
-        sourceType: question.source_type,
-        sourceLabel: question.source_label,
-      }))
-
-    window.localStorage.setItem(`deep-dive-selected-questions:${selectedMemberId}`, JSON.stringify(selectedForDeepDive))
-  }, [orderedApiQuestions, selectedQuestionIds, questionTextEdits, selectedMemberId])
-
-  useEffect(() => {
-    if (!selectedMemberId) return
-
-    const snapshot: StoredView2Data = {
-      memberId: selectedMemberId,
-      member: selectedMember ?? null,
-      patientDetail: selectedPatientDetail ?? null,
-      notes: selectedNotes,
-      labs: selectedLabs,
-      meds: selectedMeds,
-      gaps: selectedGaps,
-      auths: selectedAuths,
-    }
-
-    window.localStorage.setItem(`view2-panel-data:${selectedMemberId}`, JSON.stringify(snapshot))
-  }, [selectedMemberId, selectedMember, selectedNotes, selectedLabs, selectedMeds, selectedGaps, selectedAuths])
 
   function addManualQuestion() {
     const text = newQuestionText.trim()
@@ -2107,18 +2146,30 @@ export function DeepDiveView({
       saveBeforeNavigate: () => {
         if (!activeMemberId) return
 
-        // Update selected questions with current answers and save to localStorage
+        // Update selected questions with current answers
         const updatedQuestions = selectedQuestions.map((q) => ({
           ...q,
           patient_answer: questionAnswers[q.id] || '',
         }))
-        window.localStorage.setItem(`deep-dive-selected-questions:${activeMemberId}`, JSON.stringify(updatedQuestions))
 
-        // Save call notes
-        window.localStorage.setItem(`deep-dive-call-notes:${activeMemberId}`, callNotes)
+        const existingSessionRaw = window.localStorage.getItem(`deep-dive-session:${activeMemberId}`)
+        let existingSession: { view2Data?: StoredView2Data } = {}
+        try {
+          existingSession = existingSessionRaw ? JSON.parse(existingSessionRaw) : {}
+        } catch {
+          // ignore parse errors
+        }
+
+        // Save all data to single key
+        const deepDiveData = {
+          selectedQuestions: updatedQuestions,
+          callNotes: callNotes,
+          view2Data: storedView2Data ?? existingSession.view2Data,
+        }
+        window.localStorage.setItem(`deep-dive-session:${activeMemberId}`, JSON.stringify(deepDiveData))
       },
     }),
-    [activeMemberId, questionAnswers, callNotes],
+    [activeMemberId, questionAnswers, callNotes, selectedQuestions, storedView2Data],
   )
 
   const effectiveMember = selectedMember ?? storedView2Data?.member ?? null
@@ -2185,57 +2236,66 @@ export function DeepDiveView({
     const memberId = selectedMember?.member_id || routeMemberId
     if (!memberId) {
       setSelectedQuestions([])
-      return
-    }
-
-    const raw = window.localStorage.getItem(`deep-dive-selected-questions:${memberId}`)
-    if (!raw) {
-      setSelectedQuestions([])
-      return
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as SuggestedQuestion[]
-      setSelectedQuestions(Array.isArray(parsed) ? parsed : [])
-      // Extract answers from the questions and populate questionAnswers state
-      const answersMap: Record<string, string> = {}
-      if (Array.isArray(parsed)) {
-        parsed.forEach((q) => {
-          if (q.patient_answer) {
-            answersMap[q.id] = q.patient_answer
-          }
-        })
-      }
-      setQuestionAnswers(answersMap)
-    } catch {
-      setSelectedQuestions([])
-    }
-  }, [selectedMember?.member_id, routeMemberId])
-
-  useEffect(() => {
-    if (!activeMemberId) {
+      setQuestionAnswers({})
       setCallNotes('')
       return
     }
 
-    const rawCallNotes = window.localStorage.getItem(`deep-dive-call-notes:${activeMemberId}`)
-    setCallNotes(rawCallNotes ?? '')
-  }, [activeMemberId])
+    const raw = window.localStorage.getItem(`deep-dive-session:${memberId}`)
+    if (!raw) {
+      setSelectedQuestions([])
+      setQuestionAnswers({})
+      setCallNotes('')
+      return
+    }
+
+    try {
+      const data = JSON.parse(raw) as { selectedQuestions?: SuggestedQuestion[]; callNotes?: string; view2Data?: StoredView2Data }
+      const questions = Array.isArray(data.selectedQuestions) ? data.selectedQuestions : []
+      setSelectedQuestions(questions)
+
+      // Extract answers from the questions and populate questionAnswers state
+      const answersMap: Record<string, string> = {}
+      questions.forEach((q) => {
+        if (q.patient_answer) {
+          answersMap[q.id] = q.patient_answer
+        }
+      })
+      setQuestionAnswers(answersMap)
+      setCallNotes(data.callNotes ?? '')
+      setStoredView2Data(data.view2Data ?? null)
+    } catch {
+      setSelectedQuestions([])
+      setQuestionAnswers({})
+      setCallNotes('')
+      setStoredView2Data(null)
+    }
+  }, [selectedMember?.member_id, routeMemberId])
 
   useEffect(() => {
     if (!activeMemberId) return
+
+    const existingSessionRaw = window.localStorage.getItem(`deep-dive-session:${activeMemberId}`)
+    let existingSession: { view2Data?: StoredView2Data } = {}
+    try {
+      existingSession = existingSessionRaw ? JSON.parse(existingSessionRaw) : {}
+    } catch {
+      // ignore parse errors
+    }
+
     // Update selected questions with current answers
     const updatedQuestions = selectedQuestions.map((q) => ({
       ...q,
       patient_answer: questionAnswers[q.id] || '',
     }))
-    window.localStorage.setItem(`deep-dive-selected-questions:${activeMemberId}`, JSON.stringify(updatedQuestions))
-  }, [activeMemberId, questionAnswers, selectedQuestions])
-
-  useEffect(() => {
-    if (!activeMemberId) return
-    window.localStorage.setItem(`deep-dive-call-notes:${activeMemberId}`, callNotes)
-  }, [activeMemberId, callNotes])
+    // Save all data to single key
+    const deepDiveData = {
+      selectedQuestions: updatedQuestions,
+      callNotes: callNotes,
+      view2Data: storedView2Data ?? existingSession.view2Data,
+    }
+    window.localStorage.setItem(`deep-dive-session:${activeMemberId}`, JSON.stringify(deepDiveData))
+  }, [activeMemberId, questionAnswers, selectedQuestions, callNotes, storedView2Data])
 
   useEffect(() => {
     if (selectedMember) {
@@ -2245,15 +2305,42 @@ export function DeepDiveView({
 
     if (!routeMemberId) return
 
-    const raw = window.localStorage.getItem(`view2-panel-data:${routeMemberId}`)
-    if (!raw) {
+    const deepDiveSessionRaw = window.localStorage.getItem(`deep-dive-session:${routeMemberId}`)
+    if (deepDiveSessionRaw) {
+      try {
+        const parsedSession = JSON.parse(deepDiveSessionRaw) as { view2Data?: StoredView2Data }
+        if (parsedSession.view2Data) {
+          setStoredView2Data(parsedSession.view2Data)
+          window.localStorage.removeItem(`view2-panel-data:${routeMemberId}`)
+          return
+        }
+      } catch {
+        // fall through to legacy fallback
+      }
+    }
+
+    const legacyRaw = window.localStorage.getItem(`view2-panel-data:${routeMemberId}`)
+    if (!legacyRaw) {
       setStoredView2Data(null)
       return
     }
 
     try {
-      const parsed = JSON.parse(raw) as StoredView2Data
-      setStoredView2Data(parsed)
+      const legacyParsed = JSON.parse(legacyRaw) as StoredView2Data
+      setStoredView2Data(legacyParsed)
+      const mergedSessionRaw = window.localStorage.getItem(`deep-dive-session:${routeMemberId}`)
+      let mergedSession: { selectedQuestions?: SuggestedQuestion[]; callNotes?: string; view2Data?: StoredView2Data } = {}
+      try {
+        mergedSession = mergedSessionRaw ? JSON.parse(mergedSessionRaw) : {}
+      } catch {
+        mergedSession = {}
+      }
+      window.localStorage.setItem(`deep-dive-session:${routeMemberId}`, JSON.stringify({
+        selectedQuestions: Array.isArray(mergedSession.selectedQuestions) ? mergedSession.selectedQuestions : [],
+        callNotes: mergedSession.callNotes ?? '',
+        view2Data: legacyParsed,
+      }))
+      window.localStorage.removeItem(`view2-panel-data:${routeMemberId}`)
     } catch {
       setStoredView2Data(null)
     }
