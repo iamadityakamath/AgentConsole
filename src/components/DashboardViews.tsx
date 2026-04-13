@@ -16,6 +16,7 @@ import type {
   DeepDiveQuestionResponse,
   DeepDiveSectionId,
 } from '../types/callWorkflow'
+import { downloadCarePlanDocx } from '../utils/carePlanDocx'
 
 const severityPillStyles: Record<SeverityLevel, string> = {
   Critical: 'bg-red-100 text-red-700 border-red-200',
@@ -2911,9 +2912,111 @@ export function DeepDiveView({
 }
 
 export function SummaryView() {
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+
+  const routeMemberId = (() => {
+    const match = /^\/summary\/([^/]+)$/.exec(window.location.pathname)
+    return match?.[1] ? decodeURIComponent(match[1]) : ''
+  })()
+
+  const sessionData = useMemo(() => {
+    if (!routeMemberId) return null
+    const raw = window.localStorage.getItem(`deep-dive-session:${routeMemberId}`)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw) as {
+        selectedQuestions?: SuggestedQuestion[]
+        callNotes?: string
+        view2Data?: StoredView2Data
+      }
+    } catch {
+      return null
+    }
+  }, [routeMemberId])
+
+  const view2Data = sessionData?.view2Data ?? null
+  const selectedQuestions = Array.isArray(sessionData?.selectedQuestions) ? sessionData?.selectedQuestions : []
+  const callNotes = sessionData?.callNotes ?? ''
+
+  const canExport = Boolean(view2Data?.patientDetail)
+
+  async function handleExportDocx() {
+    if (!view2Data?.patientDetail) {
+      setExportError('Patient details are missing. Open View 2 first to load data before exporting.')
+      return
+    }
+
+    setIsExporting(true)
+    setExportError('')
+
+    try {
+      await downloadCarePlanDocx({
+        patientDetail: view2Data.patientDetail,
+        notes: view2Data.notes,
+        labs: view2Data.labs,
+        medications: view2Data.meds,
+        careGaps: view2Data.gaps,
+        priorAuths: view2Data.auths,
+        selectedQuestions,
+        callNotes,
+        careplanDate: new Date().toISOString().slice(0, 10),
+      })
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Failed to generate DOCX file')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
-    <div className="summary-print-root min-h-[720px] bg-white">
-      {/* View 4 content area - blank for now */}
+    <div className="summary-print-root min-h-[720px] bg-white px-6 py-8">
+      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-slate-50 p-6 shadow-sm">
+        <h2 className="text-2xl font-semibold text-slate-900">Care Plan Document Export</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Export View 2 clinical data and View 3 call responses into a Word document.
+        </p>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 text-sm text-slate-700 md:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Labs</p>
+            <p className="mt-1 text-lg font-semibold">{view2Data?.labs.length ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Medications</p>
+            <p className="mt-1 text-lg font-semibold">{view2Data?.meds.length ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Care Gaps</p>
+            <p className="mt-1 text-lg font-semibold">{view2Data?.gaps.length ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Selected Questions</p>
+            <p className="mt-1 text-lg font-semibold">{selectedQuestions.length}</p>
+          </div>
+        </div>
+
+        {!canExport ? (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Missing patient data in session. Open View 2 and View 3 for this member, then return here.
+          </p>
+        ) : null}
+
+        {exportError ? (
+          <p className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{exportError}</p>
+        ) : null}
+
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={handleExportDocx}
+            disabled={isExporting || !canExport}
+            className="rounded-full bg-clinical-header px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isExporting ? 'Generating Word Document...' : 'Download Care Plan (.docx)'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
