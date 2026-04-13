@@ -18,6 +18,7 @@ import type {
 } from '../types/callWorkflow'
 import { useCallback } from 'react'
 import { downloadCarePlanPdf } from '../utils/carePlanPdf'
+import { downloadCarePlanDocx } from '../utils/carePlanDocx'
 
 const severityPillStyles: Record<SeverityLevel, string> = {
   Critical: 'bg-red-100 text-red-700 border-red-200',
@@ -3026,16 +3027,75 @@ export function SummaryView() {
     editableCallNotes,
   ])
 
+  const handleExportDocx = useCallback(async () => {
+    if (!view2Data?.patientDetail) {
+      setExportError('Patient details are missing. Open View 2 first to load data before exporting.')
+      return
+    }
+
+    setIsExportingPdf(true)
+    setExportError('')
+
+    try {
+      const updatedPatient = {
+        ...view2Data.patientDetail,
+        full_name: patientName,
+        primary_conditions: primaryConditions,
+        assigned_coordinator: assignedCoordinator,
+        risk_tier: riskTier,
+      }
+
+      const updatedNotes = [...view2Data.notes]
+      if (updatedNotes[0]) {
+        updatedNotes[0] = {
+          ...updatedNotes[0],
+          plan: dischargePlan,
+        }
+      }
+
+      downloadCarePlanDocx({
+        patientDetail: updatedPatient,
+        notes: updatedNotes,
+        labs: view2Data.labs,
+        medications: view2Data.meds,
+        careGaps: view2Data.gaps,
+        priorAuths: view2Data.auths,
+        selectedQuestions: editableQuestions,
+        callNotes: editableCallNotes,
+        careplanDate: new Date().toISOString().slice(0, 10),
+      })
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Failed to generate Word document')
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }, [
+    view2Data,
+    patientName,
+    primaryConditions,
+    assignedCoordinator,
+    riskTier,
+    dischargePlan,
+    editableQuestions,
+    editableCallNotes,
+  ])
+
   useEffect(() => {
     const onExportPdf = () => {
       void handleExportPdf()
     }
 
+    const onExportDocx = () => {
+      void handleExportDocx()
+    }
+
     window.addEventListener('summary-export-pdf', onExportPdf)
+    window.addEventListener('summary-export-docx', onExportDocx)
     return () => {
       window.removeEventListener('summary-export-pdf', onExportPdf)
+      window.removeEventListener('summary-export-docx', onExportDocx)
     }
-  }, [handleExportPdf])
+  }, [handleExportPdf, handleExportDocx])
 
   return (
     <div className="summary-print-root h-full min-h-0 overflow-hidden bg-slate-100 px-4 py-4">

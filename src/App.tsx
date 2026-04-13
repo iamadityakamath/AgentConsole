@@ -732,7 +732,7 @@ function App() {
         </header>
 
         <main className="flex-1 min-h-0 overflow-hidden bg-white p-6">
-          <section className="fade-in h-full overflow-hidden">
+          <section className="fade-in h-full overflow-y-auto">
             <Routes>
               <Route path="/" element={<Navigate to="/queue" replace />} />
               <Route path="/queue" element={(
@@ -837,12 +837,20 @@ function App() {
                 Next
               </button>
             ) : (
-              <button
-                onClick={() => window.dispatchEvent(new Event('summary-export-pdf'))}
-                className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white"
-              >
-                Download Care Plan (.pdf)
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => window.dispatchEvent(new Event('summary-export-docx'))}
+                  className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Download Care Plan (.docx)
+                </button>
+                <button
+                  onClick={() => window.dispatchEvent(new Event('summary-export-pdf'))}
+                  className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Download Care Plan (.pdf)
+                </button>
+              </div>
             )}
           </footer>
         ) : null}
