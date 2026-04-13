@@ -23,7 +23,7 @@ interface SummaryPageProps {
   deepDiveResponses: Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>
 }
 
-export function SummaryPage({ draft, ...props }: SummaryPageProps) {
+export function SummaryPage({ draft }: SummaryPageProps) {
   if (!draft) return null
-  return <SummaryView draft={draft} {...props} />
+  return <SummaryView />
 }

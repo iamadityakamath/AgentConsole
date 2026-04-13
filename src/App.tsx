@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { QueuePage } from './pages/QueuePage'
-import { OverviewPage } from './pages/OverviewPage'
-import { DeepDivePage } from './pages/DeepDivePage'
+import { OverviewPage, type OverviewPageHandle } from './pages/OverviewPage'
+import { DeepDivePage, type DeepDivePageHandle } from './pages/DeepDivePage'
 import { SummaryPage } from './pages/SummaryPage'
 import {
   loadCareGaps,
@@ -35,6 +35,34 @@ const gapPriorityRank: Record<string, number> = {
   High: 3,
   Medium: 2,
   Low: 1,
+}
+
+const LOCAL_CACHE_KEYS = {
+  dashboardData: 'app-cache-dashboard-data',
+  patientDetails: 'app-cache-patient-details-by-member',
+  careGaps: 'app-cache-care-gaps-by-member',
+  labResults: 'app-cache-lab-results-by-member',
+  medications: 'app-cache-medications-by-member',
+  priorAuths: 'app-cache-prior-auths-by-member',
+  ehrNotes: 'app-cache-ehr-notes-by-member',
+} as const
+
+function readLocalCache<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+function writeLocalCache<T>(key: string, value: T) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Ignore localStorage write failures (quota/private mode)
+  }
 }
 
 function App() {
@@ -78,8 +106,66 @@ function App() {
   const [ehrNotesByMember, setEhrNotesByMember] = useState<Record<string, DashboardData['ehrNotes']>>({})
   const [ehrNotesLoadingByMember, setEhrNotesLoadingByMember] = useState<Record<string, boolean>>({})
   const [ehrNotesErrorByMember, setEhrNotesErrorByMember] = useState<Record<string, string>>({})
+  const [cacheHydrated, setCacheHydrated] = useState(false)
+
+  // Refs for page components to expose their save functions
+  const overviewPageRef = useRef<OverviewPageHandle>(null)
+  const deepDivePageRef = useRef<DeepDivePageHandle>(null)
 
   useEffect(() => {
+    setData(readLocalCache<DashboardData | null>(LOCAL_CACHE_KEYS.dashboardData, null))
+    setPatientDetailsByMember(readLocalCache<Record<string, PatientDetailApiRecord>>(LOCAL_CACHE_KEYS.patientDetails, {}))
+    setCareGapsByMember(readLocalCache<Record<string, DashboardData['careGaps']>>(LOCAL_CACHE_KEYS.careGaps, {}))
+    setLabResultsByMember(readLocalCache<Record<string, DashboardData['labResults']>>(LOCAL_CACHE_KEYS.labResults, {}))
+    setMedicationsByMember(readLocalCache<Record<string, DashboardData['medications']>>(LOCAL_CACHE_KEYS.medications, {}))
+    setPriorAuthsByMember(readLocalCache<Record<string, DashboardData['priorAuths']>>(LOCAL_CACHE_KEYS.priorAuths, {}))
+    setEhrNotesByMember(readLocalCache<Record<string, DashboardData['ehrNotes']>>(LOCAL_CACHE_KEYS.ehrNotes, {}))
+    setCacheHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!cacheHydrated || !data) return
+    writeLocalCache(LOCAL_CACHE_KEYS.dashboardData, data)
+  }, [cacheHydrated, data])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.patientDetails, patientDetailsByMember)
+  }, [cacheHydrated, patientDetailsByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.careGaps, careGapsByMember)
+  }, [cacheHydrated, careGapsByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.labResults, labResultsByMember)
+  }, [cacheHydrated, labResultsByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.medications, medicationsByMember)
+  }, [cacheHydrated, medicationsByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.priorAuths, priorAuthsByMember)
+  }, [cacheHydrated, priorAuthsByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+    writeLocalCache(LOCAL_CACHE_KEYS.ehrNotes, ehrNotesByMember)
+  }, [cacheHydrated, ehrNotesByMember])
+
+  useEffect(() => {
+    if (!cacheHydrated) return
+
+    if (data) {
+      setLoading(false)
+      return
+    }
+
     void (async () => {
       try {
         const result = await loadDashboardData()
@@ -90,13 +176,13 @@ function App() {
         setLoading(false)
       }
     })()
-  }, [])
+  }, [cacheHydrated, data])
 
   const currentView: AppView = routeMatch?.view ?? 'queue'
   const selectedMemberId = routeMatch?.memberId ?? null
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || patientDetailsByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || patientDetailsByMember[selectedMemberId]) return
 
     setPatientDetailsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setPatientDetailsErrorByMember((prev) => {
@@ -118,10 +204,10 @@ function App() {
         setPatientDetailsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, patientDetailsByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, patientDetailsByMember])
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || careGapsByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || careGapsByMember[selectedMemberId]) return
 
     setCareGapsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setCareGapsErrorByMember((prev) => {
@@ -143,10 +229,10 @@ function App() {
         setCareGapsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, careGapsByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, careGapsByMember])
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || labResultsByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || labResultsByMember[selectedMemberId]) return
 
     setLabResultsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setLabResultsErrorByMember((prev) => {
@@ -168,10 +254,10 @@ function App() {
         setLabResultsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, labResultsByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, labResultsByMember])
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || medicationsByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || medicationsByMember[selectedMemberId]) return
 
     setMedicationsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setMedicationsErrorByMember((prev) => {
@@ -193,10 +279,10 @@ function App() {
         setMedicationsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, medicationsByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, medicationsByMember])
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || priorAuthsByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || priorAuthsByMember[selectedMemberId]) return
 
     setPriorAuthsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setPriorAuthsErrorByMember((prev) => {
@@ -218,10 +304,10 @@ function App() {
         setPriorAuthsLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, priorAuthsByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, priorAuthsByMember])
 
   useEffect(() => {
-    if (currentView !== 'overview' || !selectedMemberId || ehrNotesByMember[selectedMemberId]) return
+    if (!cacheHydrated || currentView !== 'overview' || !selectedMemberId || ehrNotesByMember[selectedMemberId]) return
 
     setEhrNotesLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: true }))
     setEhrNotesErrorByMember((prev) => {
@@ -243,7 +329,7 @@ function App() {
         setEhrNotesLoadingByMember((prev) => ({ ...prev, [selectedMemberId]: false }))
       }
     })()
-  }, [currentView, selectedMemberId, ehrNotesByMember])
+  }, [cacheHydrated, currentView, selectedMemberId, ehrNotesByMember])
 
   useEffect(() => {
     if (currentView !== 'summary' || !selectedMemberId || !data) return
@@ -510,6 +596,14 @@ function App() {
   }
 
   function navigateToView(view: AppView) {
+    // Save current view data before navigating
+    if (currentView === 'overview' && overviewPageRef.current) {
+      overviewPageRef.current.saveBeforeNavigate()
+    }
+    if (currentView === 'deep-dive' && deepDivePageRef.current) {
+      deepDivePageRef.current.saveBeforeNavigate()
+    }
+
     if (view === 'queue') {
       navigate('/queue')
       return
@@ -584,6 +678,7 @@ function App() {
               )} />
               <Route path="/overview/:memberId" element={(
                 <OverviewPage
+                ref={overviewPageRef}
                 selectedMember={selectedMember}
                 selectedTicket={selectedTicket}
                   selectedPatientDetail={selectedPatientDetail}
@@ -608,6 +703,7 @@ function App() {
               )} />
               <Route path="/deep-dive/:memberId" element={(
                 <DeepDivePage
+                ref={deepDivePageRef}
                 selectedMember={selectedMember}
                 selectedPatientDetail={selectedPatientDetail}
                 patientDetailLoading={selectedPatientDetailLoading}
@@ -650,7 +746,7 @@ function App() {
           </section>
         </main>
 
-        {currentView !== 'summary' ? (
+        {currentView !== 'queue' ? (
           <footer className="no-print shrink-0 flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
             <button
               onClick={() => navigateToView(viewOrder[Math.max(0, viewOrder.indexOf(currentView) - 1)])}
@@ -662,13 +758,15 @@ function App() {
 
             <p className="text-sm text-slate-600">Patient in focus: {selectedTicket?.patientName ?? 'None selected'}</p>
 
-            <button
-              onClick={() => navigateToView(viewOrder[Math.min(viewOrder.length - 1, viewOrder.indexOf(currentView) + 1)])}
-              disabled={viewOrder.indexOf(currentView) === viewOrder.length - 1}
-              className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next
-            </button>
+            {currentView !== 'summary' ? (
+              <button
+                onClick={() => navigateToView(viewOrder[Math.min(viewOrder.length - 1, viewOrder.indexOf(currentView) + 1)])}
+                disabled={viewOrder.indexOf(currentView) === viewOrder.length - 1}
+                className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            ) : null}
           </footer>
         ) : null}
       </div>

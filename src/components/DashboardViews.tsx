@@ -8,20 +8,14 @@ import type {
   PriorAuthorization,
   SeverityLevel,
 } from '../types/domain'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import type { TicketRow } from '../types/dashboard'
 import type { SuggestedQuestion } from '../types/questions'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
-import {
-  deepDiveSections,
-  type CarePlanDraft,
-  type DeepDiveQuestionResponse,
-  type DeepDiveSectionId,
+import type {
+  DeepDiveQuestionResponse,
+  DeepDiveSectionId,
 } from '../types/callWorkflow'
-import {
-  formatSectionQuestionCount,
-  statusIsComplete,
-} from '../utils/callWorkflow'
 
 const severityPillStyles: Record<SeverityLevel, string> = {
   Critical: 'bg-red-100 text-red-700 border-red-200',
@@ -240,6 +234,7 @@ interface OverviewViewProps {
   selectedMeds: Medication[]
   selectedGaps: CareGap[]
   selectedAuths: PriorAuthorization[]
+  forwardedRef?: React.Ref<{ saveBeforeNavigate: () => void }>
 }
 
 interface AiTimelineEvent {
@@ -466,6 +461,7 @@ export function OverviewView({
   selectedMeds,
   selectedGaps,
   selectedAuths,
+  forwardedRef,
 }: OverviewViewProps) {
   const [activePanel, setActivePanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
   const [labFilterByDate, setLabFilterByDate] = useState<Record<string, 'All' | 'High' | 'Low'>>({})
@@ -538,6 +534,43 @@ export function OverviewView({
       return [...retained, ...additions]
     })
   }, [orderedApiQuestions])
+
+  // Expose save function through ref for explicit saves before navigating
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      saveBeforeNavigate: () => {
+        if (!selectedMemberId) return
+
+        // Save selected questions for View 3
+        const selectedForDeepDive = orderedApiQuestions
+          .filter((question) => selectedQuestionIds.includes(question.question_id))
+          .map((question) => ({
+            id: question.question_id,
+            category: (question.category as SuggestedQuestion['category']) ?? 'Social',
+            text: questionTextEdits[question.question_id] ?? question.question_text,
+            sourcePositionId: question.source_position_id,
+            sourceType: question.source_type,
+            sourceLabel: question.source_label,
+          }))
+        window.localStorage.setItem(`deep-dive-selected-questions:${selectedMemberId}`, JSON.stringify(selectedForDeepDive))
+
+        // Save View 2 panel data
+        const snapshot: StoredView2Data = {
+          memberId: selectedMemberId,
+          member: selectedMember ?? null,
+          patientDetail: selectedPatientDetail ?? null,
+          notes: selectedNotes,
+          labs: selectedLabs,
+          meds: selectedMeds,
+          gaps: selectedGaps,
+          auths: selectedAuths,
+        }
+        window.localStorage.setItem(`view2-panel-data:${selectedMemberId}`, JSON.stringify(snapshot))
+      },
+    }),
+    [selectedMemberId, selectedMember, selectedPatientDetail, selectedNotes, selectedLabs, selectedMeds, selectedGaps, selectedAuths, orderedApiQuestions, selectedQuestionIds, questionTextEdits],
+  )
 
   useEffect(() => {
     if (!selectedMemberId) return
@@ -2036,6 +2069,7 @@ interface DeepDiveViewProps {
   onSetActiveSection: (sectionId: DeepDiveSectionId) => void
   onUpdateQuestion: (sectionId: DeepDiveSectionId, questionId: string, patch: Partial<DeepDiveQuestionResponse>) => void
   getSectionProgress: (sectionId: DeepDiveSectionId) => { total: number; completed: number; allComplete: boolean }
+  forwardedRef?: React.Ref<{ saveBeforeNavigate: () => void }>
 }
 
 export function DeepDiveView({
@@ -2050,6 +2084,7 @@ export function DeepDiveView({
   selectedAuths,
   selectedPharmacyClaims,
   supervisorNotes,
+  forwardedRef,
 }: DeepDiveViewProps) {
   const [activeDataPanel, setActiveDataPanel] = useState<'demographics' | 'gaps' | 'labs' | 'medications' | 'auths' | 'notes'>('demographics')
   const [selectedQuestions, setSelectedQuestions] = useState<SuggestedQuestion[]>([])
@@ -2063,6 +2098,24 @@ export function DeepDiveView({
     const match = /^\/deep-dive\/([^/]+)$/.exec(window.location.pathname)
     return match?.[1] ? decodeURIComponent(match[1]) : ''
   })()
+  const activeMemberId = selectedMember?.member_id || routeMemberId
+
+  // Expose save function through ref for explicit saves before navigating
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      saveBeforeNavigate: () => {
+        if (!activeMemberId) return
+
+        // Save question answers
+        window.localStorage.setItem(`deep-dive-question-answers:${activeMemberId}`, JSON.stringify(questionAnswers))
+
+        // Save call notes
+        window.localStorage.setItem(`deep-dive-call-notes:${activeMemberId}`, callNotes)
+      },
+    }),
+    [activeMemberId, questionAnswers, callNotes],
+  )
 
   const effectiveMember = selectedMember ?? storedView2Data?.member ?? null
   const effectivePatientDetail = selectedPatientDetail ?? storedView2Data?.patientDetail ?? null
@@ -2144,6 +2197,40 @@ export function DeepDiveView({
       setSelectedQuestions([])
     }
   }, [selectedMember?.member_id, routeMemberId])
+
+  useEffect(() => {
+    if (!activeMemberId) {
+      setQuestionAnswers({})
+      setCallNotes('')
+      return
+    }
+
+    const rawAnswers = window.localStorage.getItem(`deep-dive-question-answers:${activeMemberId}`)
+    const rawCallNotes = window.localStorage.getItem(`deep-dive-call-notes:${activeMemberId}`)
+
+    if (rawAnswers) {
+      try {
+        const parsed = JSON.parse(rawAnswers) as Record<string, string>
+        setQuestionAnswers(parsed && typeof parsed === 'object' ? parsed : {})
+      } catch {
+        setQuestionAnswers({})
+      }
+    } else {
+      setQuestionAnswers({})
+    }
+
+    setCallNotes(rawCallNotes ?? '')
+  }, [activeMemberId])
+
+  useEffect(() => {
+    if (!activeMemberId) return
+    window.localStorage.setItem(`deep-dive-question-answers:${activeMemberId}`, JSON.stringify(questionAnswers))
+  }, [activeMemberId, questionAnswers])
+
+  useEffect(() => {
+    if (!activeMemberId) return
+    window.localStorage.setItem(`deep-dive-call-notes:${activeMemberId}`, callNotes)
+  }, [activeMemberId, callNotes])
 
   useEffect(() => {
     if (selectedMember) {
@@ -2731,182 +2818,10 @@ export function DeepDiveView({
   )
 }
 
-interface SummaryViewProps {
-  draft: CarePlanDraft
-  onUpdateDraft: (field: keyof CarePlanDraft, value: string | string[]) => void
-  onUpdateDraftListItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions', index: number, value: string) => void
-  onAddDraftItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions') => void
-  onRemoveDraftItem: (field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions', index: number) => void
-  onSaveDraft: () => void
-  onExportAsPdf: () => void
-  onStartNewCall: () => void
-  toastVisible: boolean
-  sectionQuestions: Record<DeepDiveSectionId, SuggestedQuestion[]>
-  deepDiveResponses: Record<DeepDiveSectionId, Record<string, DeepDiveQuestionResponse>>
-}
-
-export function SummaryView({
-  draft,
-  onUpdateDraft,
-  onUpdateDraftListItem,
-  onAddDraftItem,
-  onRemoveDraftItem,
-  onSaveDraft,
-  onExportAsPdf,
-  onStartNewCall,
-  toastVisible,
-  sectionQuestions,
-  deepDiveResponses,
-}: SummaryViewProps) {
-  function renderQuestionSummarySection(sectionId: DeepDiveSectionId, title: string) {
-    const questions = sectionQuestions[sectionId]
-    const responses = deepDiveResponses[sectionId] ?? {}
-
-    return (
-      <section className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-            <p className="text-xs text-slate-500">{formatSectionQuestionCount(questions.filter((question) => statusIsComplete(responses[question.id]?.status ?? '')).length, questions.length)}</p>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          {questions.length === 0 ? (
-            <p className="text-sm text-slate-500">No questions available for this section.</p>
-          ) : (
-            questions.map((question) => {
-              const response = responses[question.id] ?? { notes: '', status: '' }
-              const isSkipped = response.status === 'Skipped'
-              const isFollowUp = response.status === 'Needs Follow-Up'
-
-              return (
-                <article key={question.id} className={`rounded-md border p-3 ${isSkipped ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-slate-200 bg-white'}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{question.text}</p>
-                      <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">{question.category}</p>
-                    </div>
-                    {isFollowUp ? (
-                      <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Needs Follow-Up</span>
-                    ) : isSkipped ? (
-                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">Skipped</span>
-                    ) : null}
-                  </div>
-                  <div className="mt-2 rounded-md bg-slate-50 p-2 text-sm text-slate-700">
-                    {isSkipped ? <p>Skipped</p> : response.notes.trim() ? <p className="whitespace-pre-wrap">{response.notes}</p> : <p className="italic text-slate-500">No coordinator notes captured.</p>}
-                  </div>
-                </article>
-              )
-            })
-          )}
-        </div>
-      </section>
-    )
-  }
-
-  function renderEditableListField(
-    label: string,
-    field: 'activeDiagnoses' | 'currentMedications' | 'openCareGaps' | 'recommendedInterventions' | 'followUpActions',
-    items: string[],
-    placeholder: string,
-  ) {
-    return (
-      <section className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">{label}</h4>
-          <button onClick={() => onAddDraftItem(field)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">Add Item</button>
-        </div>
-
-        <div className="space-y-2">
-          {items.length === 0 ? (
-            <p className="text-sm text-slate-500">No items added yet.</p>
-          ) : (
-            items.map((item, index) => (
-              <div key={`${field}-${index}`} className="flex items-start gap-2">
-                <textarea
-                  value={item}
-                  onChange={(event) => onUpdateDraftListItem(field, index, event.target.value)}
-                  rows={2}
-                  placeholder={placeholder}
-                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
-                />
-                <button onClick={() => onRemoveDraftItem(field, index)} className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100">Remove</button>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-    )
-  }
-
+export function SummaryView() {
   return (
-    <div className="summary-print-root grid min-h-[720px] grid-cols-[44%_56%] gap-5">
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div className="mb-3 rounded-lg bg-white p-4 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">Answers Collected</h2>
-          <p className="mt-1 text-sm text-slate-600">Read-only call summary organized by section.</p>
-        </div>
-
-        <div className="max-h-[780px] flex-1 space-y-3 overflow-auto pr-1">
-          {deepDiveSections.map((section) => renderQuestionSummarySection(section.id, section.label))}
-        </div>
-      </div>
-
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 rounded-lg bg-slate-50 p-4">
-          <h2 className="text-xl font-semibold text-slate-900">Care Plan Draft Preview</h2>
-          <p className="mt-1 text-sm text-slate-600">All sections are editable inline.</p>
-        </div>
-
-        <div className="max-h-[780px] flex-1 space-y-4 overflow-auto pr-1">
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="grid grid-cols-3 gap-3">
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Patient Name</span>
-                <input value={draft.patientName} onChange={(event) => onUpdateDraft('patientName', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Member ID</span>
-                <input value={draft.memberId} onChange={(event) => onUpdateDraft('memberId', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Date</span>
-                <input value={draft.date} onChange={(event) => onUpdateDraft('date', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-clinical-header" />
-              </label>
-            </div>
-          </section>
-
-          {renderEditableListField('Active Diagnoses', 'activeDiagnoses', draft.activeDiagnoses, 'Type or edit diagnosis')}
-          {renderEditableListField('Current Medications', 'currentMedications', draft.currentMedications, 'Type or edit medication line')}
-          {renderEditableListField('Open Care Gaps', 'openCareGaps', draft.openCareGaps, 'Type or edit care gap')}
-          {renderEditableListField('Recommended Interventions', 'recommendedInterventions', draft.recommendedInterventions, 'Type or edit intervention')}
-          {renderEditableListField('Follow-Up Actions', 'followUpActions', draft.followUpActions, 'Type or edit follow-up action')}
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Coordinator Notes</h4>
-            <textarea
-              value={draft.coordinatorNotes}
-              onChange={(event) => onUpdateDraft('coordinatorNotes', event.target.value)}
-              rows={5}
-              placeholder="Add free-text notes for the care plan"
-              className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-clinical-header"
-            />
-          </section>
-        </div>
-      </div>
-
-      <div className="no-print fixed bottom-6 right-6 flex items-center gap-2">
-        {toastVisible ? (
-          <div className="rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">Draft saved successfully</div>
-        ) : null}
-      </div>
-
-      <div className="no-print fixed inset-x-0 bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
-        <button onClick={onSaveDraft} className="rounded-md bg-clinical-header px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110">Save Draft</button>
-        <button onClick={onExportAsPdf} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Export as PDF</button>
-        <button onClick={onStartNewCall} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Start New Call</button>
-      </div>
+    <div className="summary-print-root min-h-[720px] bg-white">
+      {/* View 4 content area - blank for now */}
     </div>
   )
 }

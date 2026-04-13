@@ -1,7 +1,12 @@
+import { forwardRef } from 'react'
 import type { CareGap, EhrNote, LabResult, Medication, MemberProfile, PriorAuthorization } from '../types/domain'
 import type { TicketRow } from '../types/dashboard'
 import { OverviewView } from '../components/DashboardViews'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
+
+export interface OverviewPageHandle {
+  saveBeforeNavigate: () => void
+}
 
 interface OverviewPageProps {
   selectedMember: MemberProfile | null
@@ -26,6 +31,6 @@ interface OverviewPageProps {
   selectedAuths: PriorAuthorization[]
 }
 
-export function OverviewPage(props: OverviewPageProps) {
-  return <OverviewView {...props} />
-}
+export const OverviewPage = forwardRef<OverviewPageHandle, OverviewPageProps>((props, ref) => {
+  return <OverviewView {...props} forwardedRef={ref} />
+})

@@ -1,8 +1,13 @@
+import { forwardRef } from 'react'
 import type { CareGap, EhrNote, InsuranceClaim, LabResult, Medication, MemberProfile, PharmacyClaim, PriorAuthorization } from '../types/domain'
 import type { SuggestedQuestion } from '../types/questions'
 import type { DeepDiveQuestionResponse, DeepDiveSectionId } from '../types/callWorkflow'
 import { DeepDiveView } from '../components/DashboardViews'
 import type { PatientDetailApiRecord } from '../services/dashboardApi'
+
+export interface DeepDivePageHandle {
+  saveBeforeNavigate: () => void
+}
 
 interface DeepDivePageProps {
   selectedMember: MemberProfile | null
@@ -27,6 +32,6 @@ interface DeepDivePageProps {
   getSectionProgress: (sectionId: DeepDiveSectionId) => { total: number; completed: number; allComplete: boolean }
 }
 
-export function DeepDivePage(props: DeepDivePageProps) {
-  return <DeepDiveView {...props} />
-}
+export const DeepDivePage = forwardRef<DeepDivePageHandle, DeepDivePageProps>((props, ref) => {
+  return <DeepDiveView {...props} forwardedRef={ref} />
+})
