@@ -2107,8 +2107,12 @@ export function DeepDiveView({
       saveBeforeNavigate: () => {
         if (!activeMemberId) return
 
-        // Save question answers
-        window.localStorage.setItem(`deep-dive-question-answers:${activeMemberId}`, JSON.stringify(questionAnswers))
+        // Update selected questions with current answers and save to localStorage
+        const updatedQuestions = selectedQuestions.map((q) => ({
+          ...q,
+          patient_answer: questionAnswers[q.id] || '',
+        }))
+        window.localStorage.setItem(`deep-dive-selected-questions:${activeMemberId}`, JSON.stringify(updatedQuestions))
 
         // Save call notes
         window.localStorage.setItem(`deep-dive-call-notes:${activeMemberId}`, callNotes)
@@ -2193,6 +2197,16 @@ export function DeepDiveView({
     try {
       const parsed = JSON.parse(raw) as SuggestedQuestion[]
       setSelectedQuestions(Array.isArray(parsed) ? parsed : [])
+      // Extract answers from the questions and populate questionAnswers state
+      const answersMap: Record<string, string> = {}
+      if (Array.isArray(parsed)) {
+        parsed.forEach((q) => {
+          if (q.patient_answer) {
+            answersMap[q.id] = q.patient_answer
+          }
+        })
+      }
+      setQuestionAnswers(answersMap)
     } catch {
       setSelectedQuestions([])
     }
@@ -2200,32 +2214,23 @@ export function DeepDiveView({
 
   useEffect(() => {
     if (!activeMemberId) {
-      setQuestionAnswers({})
       setCallNotes('')
       return
     }
 
-    const rawAnswers = window.localStorage.getItem(`deep-dive-question-answers:${activeMemberId}`)
     const rawCallNotes = window.localStorage.getItem(`deep-dive-call-notes:${activeMemberId}`)
-
-    if (rawAnswers) {
-      try {
-        const parsed = JSON.parse(rawAnswers) as Record<string, string>
-        setQuestionAnswers(parsed && typeof parsed === 'object' ? parsed : {})
-      } catch {
-        setQuestionAnswers({})
-      }
-    } else {
-      setQuestionAnswers({})
-    }
-
     setCallNotes(rawCallNotes ?? '')
   }, [activeMemberId])
 
   useEffect(() => {
     if (!activeMemberId) return
-    window.localStorage.setItem(`deep-dive-question-answers:${activeMemberId}`, JSON.stringify(questionAnswers))
-  }, [activeMemberId, questionAnswers])
+    // Update selected questions with current answers
+    const updatedQuestions = selectedQuestions.map((q) => ({
+      ...q,
+      patient_answer: questionAnswers[q.id] || '',
+    }))
+    window.localStorage.setItem(`deep-dive-selected-questions:${activeMemberId}`, JSON.stringify(updatedQuestions))
+  }, [activeMemberId, questionAnswers, selectedQuestions])
 
   useEffect(() => {
     if (!activeMemberId) return

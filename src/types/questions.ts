@@ -8,6 +8,7 @@ export interface SuggestedQuestion {
   sourcePositionId?: string
   sourceType?: string
   sourceLabel?: string
+  patient_answer?: string
 }
 
 export interface QuestionUIState {
