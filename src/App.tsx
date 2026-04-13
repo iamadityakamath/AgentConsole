@@ -689,7 +689,7 @@ function App() {
         <div className="w-full rounded-xl border border-red-200 bg-white p-8 shadow-sm md:rounded-2xl">
           <h2 className="text-xl font-semibold text-red-700">Unable to load patient data</h2>
           <p className="mt-2 text-sm text-slate-700">{loadError}</p>
-          <p className="mt-1 text-sm text-slate-600">Expected endpoint: http://localhost:8000/api/v1/patients</p>
+          <p className="mt-1 text-sm text-slate-600">Expected endpoint: https://retrorsely-uncondensational-bentlee.ngrok-free.dev/api/v1/patients</p>
         </div>
       </div>
     )

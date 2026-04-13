@@ -323,7 +323,7 @@ When saving Deep Dive data:
 ### Current Status
 
 - **Data Source**: Static mock data (dashboardApi.ts)
-- **AI Endpoint**: `http://localhost:8000/api/v1/ai/understand_patient_data`
+- **AI Endpoint**: `https://retrorsely-uncondensational-bentlee.ngrok-free.dev/api/v1/ai/understand_patient_data`
 - **Integration Ready**: Backend API can be plugged in without UI changes
 
 ### Available API Functions
@@ -406,7 +406,7 @@ window.addEventListener('summary-export-pdf', onExportPdf)
 - Check localStorage key contains selectedQuestions array
 
 **AI Suggestions not generating**
-- Verify backend server running at `http://localhost:8000`
+- Verify backend server running at `https://retrorsely-uncondensational-bentlee.ngrok-free.dev`
 - Check API endpoint responds to POST requests
 - Verify patient data loaded in View 2 first
 

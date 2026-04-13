@@ -488,7 +488,8 @@ export function OverviewView({
   const [draggingApiQuestionId, setDraggingApiQuestionId] = useState<string | null>(null)
   const [dragOverApiQuestionId, setDragOverApiQuestionId] = useState<string | null>(null)
 
-  const aiSuggestionsEndpoint = 'http://localhost:8000/api/v1/ai/undertand_patient_data'
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'https://retrorsely-uncondensational-bentlee.ngrok-free.dev').replace(/\/$/, '')
+  const aiSuggestionsEndpoint = `${apiBaseUrl}/api/v1/ai/undertand_patient_data`
   const routeMemberId = (() => {
     const match = /^\/overview\/([^/]+)$/.exec(window.location.pathname)
     return match?.[1] ? decodeURIComponent(match[1]) : ''
@@ -828,10 +829,12 @@ export function OverviewView({
     setAiSuggestionsError('')
 
     try {
+      const isNgrokEndpoint = aiSuggestionsEndpoint.includes('.ngrok-free.dev')
       const response = await fetch(aiSuggestionsEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(isNgrokEndpoint ? { 'ngrok-skip-browser-warning': 'true' } : {}),
         },
         body: JSON.stringify(buildAiSuggestionsPayload()),
       })

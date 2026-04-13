@@ -137,15 +137,30 @@ interface EhrNoteApiRecord {
   follow_up_date: string | null
 }
 
-const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? 'http://localhost:8000/api/v1/patients'
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'https://retrorsely-uncondensational-bentlee.ngrok-free.dev').replace(/\/$/, '')
+const API_V1_BASE = `${API_BASE_URL}/api/v1`
+const PATIENTS_ENDPOINT = import.meta.env.VITE_PATIENTS_ENDPOINT ?? `${API_V1_BASE}/patients`
 const REQUEST_TIMEOUT_MS = 10000
+
+function buildRequestHeaders(url: string): HeadersInit | undefined {
+  // ngrok free domains can require this header to bypass browser warning pages for API calls.
+  if (url.includes('.ngrok-free.dev')) {
+    return {
+      'ngrok-skip-browser-warning': 'true',
+    }
+  }
+  return undefined
+}
 
 async function fetchWithTimeout(url: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    return await fetch(url, { signal: controller.signal })
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: buildRequestHeaders(url),
+    })
   } finally {
     window.clearTimeout(timeoutId)
   }
@@ -240,8 +255,8 @@ function normalizePriorAuthDecision(value: string): PriorAuthorization['decision
 
 export async function loadCareGaps(memberId: string): Promise<CareGap[]> {
   const urls = [
-    `http://localhost:8000/api/v1/care-gaps/${encodeURIComponent(memberId)}`,
-    `http://localhost:8000/api/v1/care-gaps?member_id=${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/care-gaps/${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/care-gaps?member_id=${encodeURIComponent(memberId)}`,
   ]
 
   let payload: unknown = null
@@ -287,8 +302,8 @@ export async function loadCareGaps(memberId: string): Promise<CareGap[]> {
 
 export async function loadLabResults(memberId: string): Promise<LabResult[]> {
   const urls = [
-    `http://localhost:8000/api/v1/lab-results/${encodeURIComponent(memberId)}`,
-    `http://localhost:8000/api/v1/lab-results?member_id=${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/lab-results/${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/lab-results?member_id=${encodeURIComponent(memberId)}`,
   ]
 
   let payload: unknown = null
@@ -335,8 +350,8 @@ export async function loadLabResults(memberId: string): Promise<LabResult[]> {
 
 export async function loadMedications(memberId: string): Promise<Medication[]> {
   const urls = [
-    `http://localhost:8000/api/v1/medications/${encodeURIComponent(memberId)}`,
-    `http://localhost:8000/api/v1/medications?member_id=${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/medications/${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/medications?member_id=${encodeURIComponent(memberId)}`,
   ]
 
   let payload: unknown = null
@@ -385,8 +400,8 @@ export async function loadMedications(memberId: string): Promise<Medication[]> {
 
 export async function loadPriorAuthorizations(memberId: string): Promise<PriorAuthorization[]> {
   const urls = [
-    `http://localhost:8000/api/v1/prior-auth/${encodeURIComponent(memberId)}`,
-    `http://localhost:8000/api/v1/prior-auth?member_id=${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/prior-auth/${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/prior-auth?member_id=${encodeURIComponent(memberId)}`,
   ]
 
   let payload: unknown = null
@@ -433,8 +448,8 @@ export async function loadPriorAuthorizations(memberId: string): Promise<PriorAu
 
 export async function loadEhrNotes(memberId: string): Promise<DashboardData['ehrNotes']> {
   const urls = [
-    `http://localhost:8000/api/v1/ehr-notes/${encodeURIComponent(memberId)}`,
-    `http://localhost:8000/api/v1/ehr-notes?member_id=${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/ehr-notes/${encodeURIComponent(memberId)}`,
+    `${API_V1_BASE}/ehr-notes?member_id=${encodeURIComponent(memberId)}`,
   ]
 
   let payload: unknown = null
